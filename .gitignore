@@ -1,0 +1,9 @@
+node_modules/
+__pycache__/
+*.pyc
+captcha_data.json
+captcha_data_requests.json
+.antigravity/
+.gemini/
+.env
+.vscode/

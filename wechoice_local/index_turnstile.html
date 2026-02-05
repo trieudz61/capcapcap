@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Turnstile Local Tester</title>
+    <!-- Script cho Cloudflare Turnstile -->
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f0f2f5;
+        }
+
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        h1 {
+            color: #f38020;
+        }
+
+        #status {
+            margin-top: 1rem;
+            font-weight: bold;
+            color: #555;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Turnstile Local Tester</h1>
+        <p>Domain: <span id="display-domain"></span></p>
+
+        <div id="turnstile-container"></div>
+
+        <div id="status">Trạng thái: Đang khởi tạo...</div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const siteKey = urlParams.get('k') || "0x4AAAAAACMZS_6vw7sJctTQ";
+        document.getElementById('display-domain').innerText = window.location.hostname;
+
+        // Render Turnstile dynamically
+        window.onloadTurnstileCallback = function () {
+            turnstile.render('#turnstile-container', {
+                sitekey: siteKey,
+                callback: function (token) {
+                    document.getElementById('status').innerText = "Trạng thái: Đã có Token!";
+                    document.getElementById('status').style.color = "orange";
+                    console.log("TURNSTILE_TOKEN:" + token);
+                },
+            });
+        };
+    </script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onloadTurnstileCallback" async
+        defer></script>
+</body>
+
+</html>

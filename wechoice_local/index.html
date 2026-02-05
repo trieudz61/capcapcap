@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WeChoice Captcha Solver Local</title>
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f0f2f5;
+        }
+
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        h1 {
+            color: #1a73e8;
+        }
+
+        #status {
+            margin-top: 1rem;
+            font-weight: bold;
+            color: #555;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>WeChoice Captcha Local</h1>
+        <p>Hệ thống đang chờ lệnh từ script Python...</p>
+
+        <!-- Thay SITE_KEY vào đây sau khi bạn tìm được từ wechoice.vn -->
+        <div class="g-recaptcha" data-sitekey="6LfGqN0UAAAAAFdGo4OSj5Awi8hM_9kmR7VfXUP2"
+            data-callback="onCaptchaSolved"></div>
+
+        <div id="status">Trạng thái: Đang chờ...</div>
+    </div>
+
+    <script>
+        function onCaptchaSolved(token) {
+            document.getElementById('status').innerText = "Trạng thái: Đã có Token!";
+            document.getElementById('status').style.color = "green";
+            console.log("CAPTCHA_TOKEN:" + token);
+            // Bạn có thể dùng tool để đọc console log này
+        }
+    </script>
+</body>
+
+</html>
