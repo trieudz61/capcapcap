@@ -13,6 +13,18 @@ db.run('PRAGMA journal_mode=WAL');
 db.run('PRAGMA synchronous=NORMAL');
 db.run('PRAGMA cache_size=10000'); // 10MB cache
 
+// Simple async lock to serialize database transactions across the app
+let dbLock = Promise.resolve();
+async function acquireLock() {
+    let release;
+    const wait = dbLock;
+    dbLock = new Promise(resolve => {
+        release = resolve;
+    });
+    await wait;
+    return release;
+}
+
 // Helper for Async Queries
 export const query = (sql, params = []) => {
     return new Promise((resolve, reject) => {
@@ -48,6 +60,25 @@ export const exec = (sql) => {
             else resolve();
         });
     });
+};
+
+/**
+ * Standardized transaction handler with serialized locking
+ * This ensures only one transaction runs at a time on the SQLite connection.
+ */
+export const withTransaction = async (workFn) => {
+    const release = await acquireLock();
+    try {
+        await run('BEGIN IMMEDIATE');
+        const result = await workFn();
+        await run('COMMIT');
+        return result;
+    } catch (err) {
+        await run('ROLLBACK').catch(() => { });
+        throw err;
+    } finally {
+        release();
+    }
 };
 
 // Initialize Schema
@@ -169,4 +200,4 @@ async function initSchema() {
 
 initSchema();
 
-export default { query, get, run, exec };
+export default { query, get, run, exec, withTransaction };

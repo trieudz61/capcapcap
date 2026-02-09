@@ -5,7 +5,7 @@ import logger from '../utils/logger.js';
 // HTTP Keep-Alive agent for connection reuse
 const httpsAgent = new https.Agent({
     keepAlive: true,
-    maxSockets: 50,
+    maxSockets: 500, // Increased for massive concurrent solves
     timeout: 30000
 });
 

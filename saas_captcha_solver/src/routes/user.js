@@ -128,34 +128,35 @@ async function userRoutes(fastify, options) {
         }
 
         try {
-            await db.run('BEGIN TRANSACTION');
+            const result = await db.withTransaction(async () => {
+                // Find valid code
+                const gift = await db.get('SELECT * FROM gift_codes WHERE code = ? AND status = "unused"', [code]);
 
-            // Find valid code
-            const gift = await db.get('SELECT * FROM gift_codes WHERE code = ? AND status = "unused"', [code]);
+                if (!gift) {
+                    throw new Error('INVALID_CODE');
+                }
 
-            if (!gift) {
-                await db.run('ROLLBACK');
+                // Update user balance
+                await db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [gift.amount, userId]);
+
+                // Mark code as used
+                await db.run('UPDATE gift_codes SET status = "used", used_by = ?, used_at = CURRENT_TIMESTAMP WHERE id = ?', [userId, gift.id]);
+
+                // Create transaction log
+                await db.run(`
+                    INSERT INTO transactions (user_id, amount, type, description)
+                    VALUES (?, ?, 'credit', ?)
+                `, [userId, gift.amount, `Redeemed Gift Code: ${code}`]);
+
+                return gift;
+            });
+
+            logger.info(`User ${userId} redeemed code ${code} for $${result.amount}`);
+            return { errorId: 0, message: 'Gift code redeemed successfully', amount: result.amount };
+        } catch (err) {
+            if (err.message === 'INVALID_CODE') {
                 return reply.status(404).send({ error: 'Invalid or used code' });
             }
-
-            // Update user balance
-            await db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [gift.amount, userId]);
-
-            // Mark code as used
-            await db.run('UPDATE gift_codes SET status = "used", used_by = ?, used_at = CURRENT_TIMESTAMP WHERE id = ?', [userId, gift.id]);
-
-            // Create transaction log
-            await db.run(`
-                INSERT INTO transactions (user_id, amount, type, description)
-                VALUES (?, ?, 'credit', ?)
-            `, [userId, gift.amount, `Redeemed Gift Code: ${code}`]);
-
-            await db.run('COMMIT');
-
-            logger.info(`User ${userId} redeemed code ${code} for $${gift.amount}`);
-            return { errorId: 0, message: 'Gift code redeemed successfully', amount: gift.amount };
-        } catch (err) {
-            await db.run('ROLLBACK').catch(() => { });
             logger.error(`Redeem Error: ${err.message}`);
             return reply.status(500).send({ error: 'Failed to redeem code' });
         }

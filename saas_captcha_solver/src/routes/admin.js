@@ -46,22 +46,19 @@ async function adminRoutes(fastify, options) {
         }
 
         try {
-            await db.run('BEGIN TRANSACTION');
+            await db.withTransaction(async () => {
+                const adjustment = type === 'credit' ? amount : -amount;
+                await db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [adjustment, userId]);
 
-            const adjustment = type === 'credit' ? amount : -amount;
-            await db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [adjustment, userId]);
-
-            await db.run(`
-                INSERT INTO transactions (user_id, amount, type, description) 
-                VALUES (?, ?, ?, ?)
-            `, [userId, amount, type, description || 'Admin adjustment']);
-
-            await db.run('COMMIT');
+                await db.run(`
+                    INSERT INTO transactions (user_id, amount, type, description) 
+                    VALUES (?, ?, ?, ?)
+                `, [userId, amount, type, description || 'Admin adjustment']);
+            });
 
             logger.info(`Admin ${type}ed ${amount} for user ${userId}`);
             return { errorId: 0, message: 'Balance updated successfully' };
         } catch (err) {
-            await db.run('ROLLBACK').catch(() => { });
             logger.error(`Admin Balance Update Error: ${err.message}`);
             return reply.status(500).send({ error: 'Failed to update balance' });
         }
