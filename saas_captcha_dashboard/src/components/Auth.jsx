@@ -85,7 +85,7 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
             } else {
                 setSuccess(t('accountCreated'));
                 setIsLogin(true);
-                setFormData(prev => ({ ...prev, password: '', confirmPassword: '' }));
+                setFormData(prev => ({ ...prev, email: prev.username, password: '', confirmPassword: '' }));
             }
         } catch (err) {
             setError(err.response?.data?.error || t('authFailed'));
@@ -194,7 +194,7 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
 
                         {(!isLogin) && (
                             <button
-                                onClick={() => setIsLogin(true)}
+                                onClick={() => { setIsLogin(true); setFormData(prev => ({ ...prev, email: prev.username })); }}
                                 className={`flex items-center gap-2 ${isDark ? 'text-slate-500 hover:text-white' : 'text-slate-600 hover:text-slate-900'} transition-colors text-xs font-bold uppercase tracking-widest mb-6`}
                             >
                                 <ChevronLeft size={14} /> {t('backToSignIn')}
@@ -366,7 +366,7 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
                         <p className={`${isDark ? 'text-slate-500' : 'text-slate-600'} text-sm font-medium`}>
                             {isLogin ? t('dontHaveAccount') : t('alreadyHaveAccount')}{' '}
                             <button
-                                onClick={() => { setIsLogin(!isLogin); setError(''); setSuccess(''); }}
+                                onClick={() => { const goingToLogin = !isLogin; setIsLogin(goingToLogin); if (goingToLogin) setFormData(prev => ({ ...prev, email: prev.username })); setError(''); setSuccess(''); }}
                                 className={`${isDark ? 'text-white hover:text-sky-400' : 'text-sky-600 hover:text-sky-500'} font-bold underline decoration-sky-500/30 underline-offset-4 transition-colors`}
                             >
                                 {isLogin ? t('signUp') : t('signIn')}

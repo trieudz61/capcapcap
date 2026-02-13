@@ -224,7 +224,7 @@ const App = () => {
         <div className={`min-h-screen flex bg-[#030712] text-slate-200 font-sans selection:bg-sky-500/30 ${!isDark ? 'light-theme' : ''}`}>
             {/* Mobile Header */}
             <header className={`lg:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 py-3 border-b ${isDark ? 'bg-[#030712]/90 border-slate-800' : 'bg-white/90 border-slate-200'} backdrop-blur-xl`}>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 cursor-pointer" onClick={() => { setActiveTab('Overview'); setIsMobileMenuOpen(false); }}>
                     <div className="w-10 h-10 flex items-center justify-center">
                         <img
                             src={isDark ? logo : logoLight}
@@ -255,7 +255,7 @@ const App = () => {
                         className={`lg:hidden fixed inset-0 z-50 flex flex-col p-6 overflow-y-auto ${isDark ? 'bg-[#030712]' : 'bg-white'}`}
                     >
                         <div className="flex items-center justify-between mb-8">
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setActiveTab('Overview'); setIsMobileMenuOpen(false); }}>
                                 <div className="w-10 h-10 flex items-center justify-center">
                                     <img
                                         src={isDark ? logo : logoLight}
@@ -325,7 +325,7 @@ const App = () => {
             </AnimatePresence>
 
             <aside className="w-72 hidden lg:flex flex-col p-6 h-screen sticky top-0 border-r border-slate-800/50 bg-[#030712]">
-                <div className="flex items-center gap-3 mb-10 px-2 group">
+                <div className="flex items-center gap-3 mb-10 px-2 group cursor-pointer" onClick={() => setActiveTab('Overview')}>
                     <div className="w-12 h-12 flex items-center justify-center">
                         <img
                             src={isDark ? logo : logoLight}
@@ -429,16 +429,19 @@ const App = () => {
                     <>
                         <header className="flex flex-col gap-6 mb-12">
                             {/* System Notification Marquee */}
-                            <div className="w-full bg-gradient-to-r from-sky-900/20 via-indigo-900/20 to-sky-900/20 border-y border-sky-500/10 py-2 relative overflow-hidden backdrop-blur-sm">
-                                <div className="absolute top-0 left-0 bottom-0 w-20 bg-gradient-to-r from-[#030712] to-transparent z-10"></div>
-                                <div className="absolute top-0 right-0 bottom-0 w-20 bg-gradient-to-l from-[#030712] to-transparent z-10"></div>
-                                <div className="animate-marquee whitespace-nowrap flex items-center gap-16 text-sm font-bold text-sky-300">
+                            <div className={`w-full border-y py-2 relative overflow-hidden backdrop-blur-sm ${isDark
+                                ? 'bg-gradient-to-r from-sky-900/20 via-indigo-900/20 to-sky-900/20 border-sky-500/10'
+                                : 'bg-gradient-to-r from-sky-50 via-indigo-50 to-sky-50 border-sky-200'
+                            }`}>
+                                <div className={`absolute top-0 left-0 bottom-0 w-20 bg-gradient-to-r z-10 ${isDark ? 'from-[#030712] to-transparent' : 'from-white to-transparent'}`}></div>
+                                <div className={`absolute top-0 right-0 bottom-0 w-20 bg-gradient-to-l z-10 ${isDark ? 'from-[#030712] to-transparent' : 'from-white to-transparent'}`}></div>
+                                <div className={`animate-marquee whitespace-nowrap flex items-center gap-16 text-sm font-bold ${isDark ? 'text-sky-300' : 'text-sky-700'}`}>
                                     <span className="inline-block">{notification}</span>
-                                    <span className="text-sky-700 mx-4">•</span>
+                                    <span className={`mx-4 ${isDark ? 'text-sky-700' : 'text-sky-300'}`}>•</span>
                                     <span className="inline-block">{notification}</span>
-                                    <span className="text-sky-700 mx-4">•</span>
+                                    <span className={`mx-4 ${isDark ? 'text-sky-700' : 'text-sky-300'}`}>•</span>
                                     <span className="inline-block">{notification}</span>
-                                    <span className="text-sky-700 mx-4">•</span>
+                                    <span className={`mx-4 ${isDark ? 'text-sky-700' : 'text-sky-300'}`}>•</span>
                                     <span className="inline-block">{notification}</span>
                                 </div>
                             </div>

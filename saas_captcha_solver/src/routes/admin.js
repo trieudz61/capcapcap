@@ -1,6 +1,8 @@
 import db from '../utils/db.js';
 import logger from '../utils/logger.js';
 import bcrypt from 'bcryptjs';
+import { getRateLimitStats } from '../middlewares/rateLimit.js';
+import { getCacheStats, invalidateAllCache } from '../services/billing.js';
 
 const generateCode = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -12,10 +14,11 @@ const generateCode = () => {
 };
 
 async function adminRoutes(fastify, options) {
-    // Middleware-like check for Admin (Simplified for now)
+    // Middleware-like check for Admin
+    const ADMIN_KEY = process.env.ADMIN_KEY || 'super-admin-secret-key';
     fastify.addHook('preHandler', async (request, reply) => {
         const adminKey = request.headers['adminkey'];
-        if (adminKey !== 'super-admin-secret-key') {
+        if (adminKey !== ADMIN_KEY) {
             return reply.status(401).send({ error: 'Unauthorized Admin Access' });
         }
     });
@@ -351,6 +354,27 @@ async function adminRoutes(fastify, options) {
         } catch (err) {
             return reply.status(500).send({ error: 'Database error' });
         }
+    });
+
+    // GET /admin/security-stats - DDoS + Cache Stats
+    fastify.get('/admin/security-stats', async (request, reply) => {
+        const stats = getRateLimitStats();
+        const cacheStats = getCacheStats();
+        return {
+            rateLimiting: stats,
+            apiKeyCache: cacheStats,
+            server: {
+                uptime: process.uptime(),
+                memory: process.memoryUsage(),
+                timestamp: new Date().toISOString()
+            }
+        };
+    });
+
+    // POST /admin/clear-cache - Emergency cache clear
+    fastify.post('/admin/clear-cache', async (request, reply) => {
+        invalidateAllCache();
+        return { success: true, message: 'API Key cache cleared' };
     });
 }
 

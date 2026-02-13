@@ -1,92 +1,142 @@
-import sqlite3 from 'sqlite3';
+import './env.js';
+import { createClient } from '@libsql/client';
 import logger from '../utils/logger.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = path.join(__dirname, '../../database.sqlite');
+// Connect to Turso (cloud) or fallback to local SQLite file
+const dbUrl = process.env.TURSO_DATABASE_URL;
+const authToken = process.env.TURSO_AUTH_TOKEN;
 
-const db = new sqlite3.Database(dbPath);
+let client;
 
-// Enable WAL mode for better write concurrency
-db.run('PRAGMA journal_mode=WAL');
-db.run('PRAGMA synchronous=NORMAL');
-db.run('PRAGMA cache_size=10000'); // 10MB cache
-
-// Simple async lock to serialize database transactions across the app
-let dbLock = Promise.resolve();
-async function acquireLock() {
-    let release;
-    const wait = dbLock;
-    dbLock = new Promise(resolve => {
-        release = resolve;
+if (dbUrl) {
+    client = createClient({
+        url: dbUrl,
+        authToken: authToken,
     });
-    await wait;
-    return release;
+    logger.info(`☁️  Connected to Turso: ${dbUrl}`);
+} else {
+    // Fallback: local SQLite file for development
+    import('path').then(async (pathMod) => {
+        const { fileURLToPath } = await import('url');
+        const __dirname = pathMod.dirname(fileURLToPath(import.meta.url));
+        const localPath = pathMod.join(__dirname, '../../database.sqlite');
+        client = createClient({ url: `file:${localPath}` });
+        logger.info(`📂 Connected to local SQLite: ${localPath}`);
+    });
 }
 
-// Helper for Async Queries
-export const query = (sql, params = []) => {
-    return new Promise((resolve, reject) => {
-        db.all(sql, params, (err, rows) => {
-            if (err) reject(err);
-            else resolve(rows);
-        });
+/**
+ * Convert libsql result rows to plain objects
+ * libsql returns rows with column names, we convert to standard objects
+ */
+function rowsToObjects(result) {
+    if (!result || !result.rows) return [];
+    return result.rows.map(row => {
+        const obj = {};
+        for (const col of result.columns) {
+            obj[col] = row[col];
+        }
+        return obj;
     });
+}
+
+// Helper: Execute query and return all rows as objects
+export const query = async (sql, params = []) => {
+    const result = await client.execute({ sql, args: params });
+    return rowsToObjects(result);
 };
 
-export const get = (sql, params = []) => {
-    return new Promise((resolve, reject) => {
-        db.get(sql, params, (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-        });
-    });
+// Helper: Execute query and return first row as object
+export const get = async (sql, params = []) => {
+    const result = await client.execute({ sql, args: params });
+    const rows = rowsToObjects(result);
+    return rows.length > 0 ? rows[0] : undefined;
 };
 
-export const run = (sql, params = []) => {
-    return new Promise((resolve, reject) => {
-        db.run(sql, params, function (err) {
-            if (err) reject(err);
-            else resolve({ id: this.lastID, changes: this.changes });
-        });
-    });
+// Helper: Execute write query, return { id, changes }
+export const run = async (sql, params = []) => {
+    const result = await client.execute({ sql, args: params });
+    return {
+        id: Number(result.lastInsertRowid) || 0,
+        changes: result.rowsAffected || 0
+    };
 };
 
-export const exec = (sql) => {
-    return new Promise((resolve, reject) => {
-        db.exec(sql, (err) => {
-            if (err) reject(err);
-            else resolve();
-        });
-    });
+// Helper: Execute multiple statements (split by semicolons)
+export const exec = async (sql) => {
+    // Split SQL by semicolons and execute each statement
+    const statements = sql
+        .split(';')
+        .map(s => s.trim())
+        .filter(s => s.length > 0 && !s.startsWith('--'));
+
+    for (const stmt of statements) {
+        await client.execute(stmt);
+    }
 };
 
 /**
- * Standardized transaction handler with serialized locking
- * This ensures only one transaction runs at a time on the SQLite connection.
+ * Transaction handler using libsql batch with transaction mode
  */
 export const withTransaction = async (workFn) => {
-    const release = await acquireLock();
+    // libsql client supports transaction() method
+    const tx = await client.transaction('write');
     try {
-        await run('BEGIN IMMEDIATE');
+        // Temporarily replace the global client methods to use transaction
+        const originalExecute = client.execute.bind(client);
+
+        // Override client.execute to use transaction during workFn
+        const txQuery = async (sql, params = []) => {
+            const result = await tx.execute({ sql, args: params });
+            return rowsToObjects(result);
+        };
+        const txGet = async (sql, params = []) => {
+            const result = await tx.execute({ sql, args: params });
+            const rows = rowsToObjects(result);
+            return rows.length > 0 ? rows[0] : undefined;
+        };
+        const txRun = async (sql, params = []) => {
+            const result = await tx.execute({ sql, args: params });
+            return {
+                id: Number(result.lastInsertRowid) || 0,
+                changes: result.rowsAffected || 0
+            };
+        };
+
+        // Temporarily swap exports for the duration of the transaction
+        const savedQuery = module_exports.query;
+        const savedGet = module_exports.get;
+        const savedRun = module_exports.run;
+
+        module_exports.query = txQuery;
+        module_exports.get = txGet;
+        module_exports.run = txRun;
+
         const result = await workFn();
-        await run('COMMIT');
+
+        // Restore originals
+        module_exports.query = savedQuery;
+        module_exports.get = savedGet;
+        module_exports.run = savedRun;
+
+        await tx.commit();
         return result;
     } catch (err) {
-        await run('ROLLBACK').catch(() => { });
+        await tx.rollback();
         throw err;
-    } finally {
-        release();
     }
 };
+
+// Module exports object (mutable for transaction swapping)
+const module_exports = { query, get, run, exec, withTransaction };
 
 // Initialize Schema
 async function initSchema() {
     logger.info('Initializing Database Schema...');
 
     try {
-        await exec(`
+        // Create tables one by one (Turso doesn't support multi-statement exec well)
+        await client.execute(`
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
@@ -100,8 +150,10 @@ async function initSchema() {
                 last_login_at DATETIME,
                 last_login_ip TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
+            )
+        `);
 
+        await client.execute(`
             CREATE TABLE IF NOT EXISTS transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -110,8 +162,10 @@ async function initSchema() {
                 description TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(user_id) REFERENCES users(id)
-            );
+            )
+        `);
 
+        await client.execute(`
             CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -121,18 +175,40 @@ async function initSchema() {
                 status TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(user_id) REFERENCES users(id)
-            );
+            )
+        `);
 
+        await client.execute(`
             CREATE TABLE IF NOT EXISTS gift_codes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 code TEXT UNIQUE NOT NULL,
                 amount DECIMAL(10, 4) NOT NULL,
-                status TEXT DEFAULT 'unused', -- 'unused', 'used'
+                status TEXT DEFAULT 'unused',
                 created_by INTEGER,
                 used_by INTEGER,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 used_at DATETIME
-            );
+            )
+        `);
+
+        await client.execute(`
+            CREATE TABLE IF NOT EXISTS pricing (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                price DECIMAL(10, 6) NOT NULL,
+                unit TEXT DEFAULT 'solve',
+                description TEXT,
+                speed TEXT DEFAULT '1-3s',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        await client.execute(`
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
         `);
 
         // Check columns (migration helper)
@@ -145,46 +221,27 @@ async function initSchema() {
         const hasLastLoginAt = columns.some(c => c.name === 'last_login_at');
         const hasLastLoginIp = columns.some(c => c.name === 'last_login_ip');
 
-        if (!hasRole) await exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'");
-        if (!hasPassword) await exec("ALTER TABLE users ADD COLUMN password TEXT");
-        if (!hasFullName) await exec("ALTER TABLE users ADD COLUMN fullName TEXT");
-        if (!hasTrialBalance) await exec("ALTER TABLE users ADD COLUMN trial_balance INTEGER DEFAULT 100");
-        if (!hasIsLocked) await exec("ALTER TABLE users ADD COLUMN is_locked INTEGER DEFAULT 0");
-        if (!hasLastLoginAt) await exec("ALTER TABLE users ADD COLUMN last_login_at DATETIME");
-        if (!hasLastLoginIp) await exec("ALTER TABLE users ADD COLUMN last_login_ip TEXT");
-
-        // Create pricing table
-        await exec(`
-            CREATE TABLE IF NOT EXISTS pricing (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                price DECIMAL(10, 6) NOT NULL,
-                unit TEXT DEFAULT 'solve',
-                description TEXT,
-                speed TEXT DEFAULT '1-3s',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
+        if (!hasRole) await run("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'");
+        if (!hasPassword) await run("ALTER TABLE users ADD COLUMN password TEXT");
+        if (!hasFullName) await run("ALTER TABLE users ADD COLUMN fullName TEXT");
+        if (!hasTrialBalance) await run("ALTER TABLE users ADD COLUMN trial_balance INTEGER DEFAULT 100");
+        if (!hasIsLocked) await run("ALTER TABLE users ADD COLUMN is_locked INTEGER DEFAULT 0");
+        if (!hasLastLoginAt) await run("ALTER TABLE users ADD COLUMN last_login_at DATETIME");
+        if (!hasLastLoginIp) await run("ALTER TABLE users ADD COLUMN last_login_ip TEXT");
 
         // Seed default pricing if empty
         const pricingCount = await get("SELECT count(*) as count FROM pricing");
         if (pricingCount.count === 0) {
-            await exec(`
-                INSERT INTO pricing (name, price, unit, description, speed) VALUES
-                ('ReCaptcha V2', 0.0005, 'solve', 'Google reCaptcha v2 checkbox', '1-3s'),
-                ('ReCaptcha V3', 0.002, 'solve', 'Google reCaptcha v3 invisible', '1-2s')
-            `);
+            await run(
+                "INSERT INTO pricing (name, price, unit, description, speed) VALUES (?, ?, ?, ?, ?)",
+                ['ReCaptcha V2', 0.0005, 'solve', 'Google reCaptcha v2 checkbox', '1-3s']
+            );
+            await run(
+                "INSERT INTO pricing (name, price, unit, description, speed) VALUES (?, ?, ?, ?, ?)",
+                ['ReCaptcha V3', 0.002, 'solve', 'Google reCaptcha v3 invisible', '1-2s']
+            );
             logger.info('Default pricing seeded');
         }
-
-        // Create settings table
-        await exec(`
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
 
         // Seed default notification if empty
         const notification = await get("SELECT * FROM settings WHERE key = 'notification'");
@@ -200,4 +257,4 @@ async function initSchema() {
 
 initSchema();
 
-export default { query, get, run, exec, withTransaction };
+export default module_exports;

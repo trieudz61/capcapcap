@@ -1,5 +1,6 @@
 import { solveReCaptchaV2 } from '../services/recaptcha.js';
-import { validateApiKey, deductBalance } from '../services/billing.js';
+import { solveTurnstile } from '../services/turnstile.js';
+import { validateApiKey, validateTrialKey, deductBalance, deductTrialBalance } from '../services/billing.js';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../utils/logger.js';
 import workerQueue from '../utils/queue.js';
@@ -52,16 +53,22 @@ async function captchaRoutes(fastify, options) {
                 if (task.type === 'ReCaptchaV2TaskProxyless') {
                     return solveReCaptchaV2(task.websiteKey, task.websiteURL);
                 }
+                if (task.type === 'TurnstileTaskProxyless') {
+                    return solveTurnstile(task.websiteKey, task.websiteURL);
+                }
                 throw new Error('Unsupported task type');
             },
             callback: async (err, token) => {
                 if (err || !token) {
                     tasks.set(taskId, { status: 'failed', error: err?.message || 'Solver returned null' });
                 } else {
-                    await deductBalance(user.id, task.type, taskId);
+                    await deductBalance(user.id, task.type, taskId, clientKey);
+                    const solution = task.type === 'TurnstileTaskProxyless'
+                        ? { token }
+                        : { gRecaptchaResponse: token };
                     tasks.set(taskId, {
                         status: 'ready',
-                        solution: { gRecaptchaResponse: token },
+                        solution,
                         completedAt: Date.now()
                     });
                 }
@@ -78,7 +85,7 @@ async function captchaRoutes(fastify, options) {
         if (!clientKey) return reply.status(401).send({ errorId: 1, errorCode: 'ERROR_KEY_DOES_NOT_EXIST' });
         if (!task || !task.type || !task.websiteURL || !task.websiteKey) return reply.status(400).send({ errorId: 1, errorCode: 'ERROR_MISSING_PARAMETERS' });
 
-        const { valid, user, message } = await import('../services/billing.js').then(m => m.validateTrialKey(clientKey));
+        const { valid, user, message } = await validateTrialKey(clientKey);
         if (!valid) return reply.status(403).send({ errorId: 1, errorCode: 'ERROR_ACCESS_DENIED', errorDescription: message });
 
         const taskId = uuidv4();
@@ -87,13 +94,21 @@ async function captchaRoutes(fastify, options) {
         workerQueue.add({
             id: taskId,
             type: task.type,
-            solver: () => solveReCaptchaV2(task.websiteKey, task.websiteURL),
+            solver: () => {
+                if (task.type === 'TurnstileTaskProxyless') {
+                    return solveTurnstile(task.websiteKey, task.websiteURL);
+                }
+                return solveReCaptchaV2(task.websiteKey, task.websiteURL);
+            },
             callback: async (err, token) => {
                 if (err || !token) {
                     tasks.set(taskId, { status: 'failed', error: err?.message || 'Solver returned null' });
                 } else {
-                    await import('../services/billing.js').then(m => m.deductTrialBalance(user.id, task.type, taskId));
-                    tasks.set(taskId, { status: 'ready', solution: { gRecaptchaResponse: token }, completedAt: Date.now() });
+                    await deductTrialBalance(user.id, task.type, taskId, clientKey);
+                    const solution = task.type === 'TurnstileTaskProxyless'
+                        ? { token }
+                        : { gRecaptchaResponse: token };
+                    tasks.set(taskId, { status: 'ready', solution, completedAt: Date.now() });
                 }
             }
         });
