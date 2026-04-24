@@ -1,27 +1,32 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { DollarSign, CheckCircle2, Zap, Shield } from 'lucide-react';
+import { DollarSign, CheckCircle2, Zap, Shield, Loader2 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext.jsx';
+import api from '../utils/api.js';
 
 const PricingPage = () => {
     const { t, isDark } = useTheme();
     const [taskTypes, setTaskTypes] = React.useState([]);
+    const [loading, setLoading] = React.useState(true);
 
     React.useEffect(() => {
         const fetchPricing = async () => {
+            setLoading(true);
             try {
-                const res = await fetch('http://127.0.0.1:5050/api/pricing');
-                const data = await res.json();
+                const res = await api.get('/api/pricing');
+                const data = res.data;
                 if (data.pricing && data.pricing.length > 0) {
                     setTaskTypes(data.pricing.map(p => ({
                         type: p.name,
-                        price: `$${Number(p.price).toFixed(4)}`, // Format as decimal
+                        price: `$${Number(p.price).toFixed(4)}`,
                         desc: p.description,
-                        features: [p.speed, p.unit, 'High Priority'] // Use real fields
+                        features: [p.speed, p.unit, 'High Priority']
                     })));
                 }
             } catch (err) {
                 console.error('Failed to load pricing', err);
+            } finally {
+                setLoading(false);
             }
         };
         fetchPricing();
@@ -31,14 +36,23 @@ const PricingPage = () => {
         {
             type: 'ReCaptcha V2',
             price: '$0.0010',
-            desc: 'Standard ReCaptcha V2 solving.',
-            features: ['1-3s Speed', 'Proxyless', 'High Success']
+            desc: 'Standard ReCaptcha V2 solving with high accuracy.',
+            features: ['1-3s Speed', 'Proxyless', 'High Success'],
+            badge: null
+        },
+        {
+            type: 'Turnstile',
+            price: '$0.0010',
+            desc: 'Cloudflare Turnstile solving — both non-interactive & managed mode.',
+            features: ['~2s Speed', 'Proxyless', 'Auto-Click Checkbox'],
+            badge: 'NEW'
         },
         {
             type: 'ReCaptcha V3',
             price: '$0.0020',
-            desc: 'Invisible ReCaptcha V3 solving.',
-            features: ['1-2s Speed', 'Proxyless', ' Enterprise Ready']
+            desc: 'Invisible ReCaptcha V3 solving with score control.',
+            features: ['1-2s Speed', 'Proxyless', 'Enterprise Ready'],
+            badge: null
         }
     ];
 
@@ -55,7 +69,7 @@ const PricingPage = () => {
                     <DollarSign className="text-emerald-500" size={32} />
                 </div>
                 <div>
-                    <h2 className={`text-4xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>{t('pricingTitle')}</h2>
+                    <h2 className={`text-2xl sm:text-4xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>{t('pricingTitle')}</h2>
                     <p className={`${isDark ? 'text-slate-500' : 'text-slate-600'} text-base font-medium mt-2 flex items-center gap-2`}>
                         <Zap size={16} className="text-amber-400" fill="currentColor" />
                         {t('premiumRates')}
@@ -63,14 +77,38 @@ const PricingPage = () => {
                 </div>
             </div>
 
+            {loading ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+                    {[1, 2, 3].map(i => (
+                        <div
+                            key={i}
+                            className={`p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] border animate-pulse ${isDark
+                                ? 'bg-slate-900/40 border-slate-800'
+                                : 'bg-white border-slate-200'
+                            }`}
+                        >
+                            <div className={`h-3 w-24 rounded-full mb-4 ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
+                            <div className={`h-5 w-36 rounded-lg mb-2 ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
+                            <div className={`h-3 w-full rounded-full mb-8 ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
+                            <div className={`h-10 w-28 rounded-lg mb-8 ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
+                            <div className="space-y-3">
+                                {[1, 2, 3].map(j => (
+                                    <div key={j} className={`h-4 w-32 rounded-full ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
+                                ))}
+                            </div>
+                            <div className={`h-12 w-full rounded-xl mt-8 ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
+                        </div>
+                    ))}
+                </div>
+            ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
                 {displayTypes.map((task, index) => (
                     <motion.div
-                        key={index}
+                        key={task.type || index}
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: index * 0.1 }}
-                        className={`group relative p-8 rounded-[32px] border transition-all duration-300 ${isDark
+                        className={`group relative p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] border transition-all duration-300 ${isDark
                             ? 'bg-slate-900/40 border-slate-800 hover:bg-slate-900/80 hover:border-sky-500/30'
                             : 'bg-white border-slate-200 shadow-xl shadow-slate-200/50 hover:border-sky-500/30 hover:shadow-sky-500/10'
                             }`}
@@ -79,9 +117,17 @@ const PricingPage = () => {
                             <Shield size={120} className={isDark ? 'text-white' : 'text-slate-900'} />
                         </div>
 
+                        {task.badge && (
+                            <div className="absolute top-4 right-4 z-20">
+                                <span className="px-3 py-1 bg-gradient-to-r from-sky-500 to-indigo-500 text-white text-[10px] font-black uppercase tracking-wider rounded-full shadow-lg shadow-sky-500/30 animate-pulse">
+                                    {task.badge}
+                                </span>
+                            </div>
+                        )}
+
                         <div className="relative z-10 flex flex-col h-full">
                             <div className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                                {t('reCaptchaService')}
+                                {task.type.toLowerCase().includes('turnstile') ? 'Cloudflare Turnstile' : t('reCaptchaService')}
                             </div>
 
                             <h3 className={`text-lg font-black font-mono mb-2 break-all ${isDark ? 'text-sky-400' : 'text-sky-600'}`}>
@@ -93,7 +139,7 @@ const PricingPage = () => {
                             </p>
 
                             <div className="flex items-baseline gap-1 mb-8">
-                                <span className={`text-4xl font-black ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                                <span className={`text-3xl sm:text-4xl font-black ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
                                     {task.price}
                                 </span>
                                 <span className={`text-xs font-bold uppercase ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
@@ -122,6 +168,7 @@ const PricingPage = () => {
                     </motion.div>
                 ))}
             </div>
+            )}
         </motion.div>
     );
 };

@@ -1,8 +1,16 @@
 import axios from 'axios';
 
+// Auto-detect API host:
+// - Production (recap1s.com): use https://api.recap1s.com via Cloudflare Tunnel
+// - Development (localhost/LAN): use http://hostname:5050
+const hostname = window.location.hostname || '127.0.0.1';
+const isProduction = hostname === 'recap1s.com' || hostname === 'www.recap1s.com';
+const baseURL = isProduction
+    ? 'https://api.recap1s.com'
+    : `http://${hostname}:5050`;
+
 const api = axios.create({
-    baseURL: 'http://127.0.0.1:5050', // Local
-    //baseURL: 'https://makeup-brake-ids-functioning.trycloudflare.com', // Cloudflare Tunnel
+    baseURL,
 });
 
 // Interceptor to add JWT token to every request

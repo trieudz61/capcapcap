@@ -1,4 +1,5 @@
 import { solveReCaptchaV2 } from '../services/recaptcha.js';
+import { solveReCaptchaV3 } from '../services/recaptchav3.js';
 import { solveTurnstile } from '../services/turnstile.js';
 import { validateApiKey, validateTrialKey, deductBalance, deductTrialBalance } from '../services/billing.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -53,6 +54,9 @@ async function captchaRoutes(fastify, options) {
                 if (task.type === 'ReCaptchaV2TaskProxyless') {
                     return solveReCaptchaV2(task.websiteKey, task.websiteURL);
                 }
+                if (task.type === 'ReCaptchaV3TaskProxyless') {
+                    return solveReCaptchaV3(task.websiteKey, task.websiteURL, task.pageAction || 'verify', task.minScore || 0.7, task.isEnterprise ?? null);
+                }
                 if (task.type === 'TurnstileTaskProxyless') {
                     return solveTurnstile(task.websiteKey, task.websiteURL);
                 }
@@ -65,7 +69,7 @@ async function captchaRoutes(fastify, options) {
                     await deductBalance(user.id, task.type, taskId, clientKey);
                     const solution = task.type === 'TurnstileTaskProxyless'
                         ? { token }
-                        : { gRecaptchaResponse: token };
+                        : { gRecaptchaResponse: token, ...(task.type === 'ReCaptchaV3TaskProxyless' ? { action: task.pageAction || 'verify' } : {}) };
                     tasks.set(taskId, {
                         status: 'ready',
                         solution,
@@ -98,6 +102,9 @@ async function captchaRoutes(fastify, options) {
                 if (task.type === 'TurnstileTaskProxyless') {
                     return solveTurnstile(task.websiteKey, task.websiteURL);
                 }
+                if (task.type === 'ReCaptchaV3TaskProxyless') {
+                    return solveReCaptchaV3(task.websiteKey, task.websiteURL, task.pageAction || 'verify', task.minScore || 0.7, task.isEnterprise ?? null);
+                }
                 return solveReCaptchaV2(task.websiteKey, task.websiteURL);
             },
             callback: async (err, token) => {
@@ -107,7 +114,7 @@ async function captchaRoutes(fastify, options) {
                     await deductTrialBalance(user.id, task.type, taskId, clientKey);
                     const solution = task.type === 'TurnstileTaskProxyless'
                         ? { token }
-                        : { gRecaptchaResponse: token };
+                        : { gRecaptchaResponse: token, ...(task.type === 'ReCaptchaV3TaskProxyless' ? { action: task.pageAction || 'verify' } : {}) };
                     tasks.set(taskId, { status: 'ready', solution, completedAt: Date.now() });
                 }
             }

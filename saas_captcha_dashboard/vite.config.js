@@ -9,8 +9,9 @@ export default defineConfig({
         host: true, // Allow external access
         strictPort: false,
         allowedHosts: [
-            'frequent-taxes-bind-differ.trycloudflare.com',
-            '.trycloudflare.com' // Allow all trycloudflare.com subdomains
+            'recap1s.com',
+            'www.recap1s.com',
+            '.trycloudflare.com'
         ]
     }
 })

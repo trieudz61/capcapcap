@@ -33,13 +33,17 @@ const BANK_CONFIG = {
 };
 
 // Deposit packages
+const USD_RATE = 26000; // 1 USD = 26,000 VNĐ
+const BONUS_THRESHOLD = 50; // Bonus 5% khi nạp >= $50
+const BONUS_PERCENT = 5;
+
 const DEPOSIT_PACKAGES = [
-    { amount: 50000, usd: 2, label: '$2', popular: false },
-    { amount: 100000, usd: 5, label: '$5', popular: false },
-    { amount: 200000, usd: 10, label: '$10', popular: true },
-    { amount: 500000, usd: 20, label: '$20', popular: false },
-    { amount: 1000000, usd: 50, label: '$50', popular: false },
-    { amount: 2000000, usd: 100, label: '$100', popular: false },
+    { amount: 52000, usd: 2, label: '$2', popular: false },
+    { amount: 130000, usd: 5, label: '$5', popular: false },
+    { amount: 260000, usd: 10, label: '$10', popular: true },
+    { amount: 520000, usd: 20, label: '$20', popular: false },
+    { amount: 1300000, usd: 50, label: '$50', popular: false, bonus: true },
+    { amount: 2600000, usd: 100, label: '$100', popular: false, bonus: true },
 ];
 
 const formatVND = (amount) => {
@@ -136,7 +140,19 @@ const BillingPage = ({ user, stats, onBalanceUpdate }) => {
     const getCurrentUSD = () => {
         if (selectedPackage) return selectedPackage.usd;
         const vnd = parseInt(customAmount) || 0;
-        return (vnd / 25000).toFixed(2);
+        return (vnd / USD_RATE).toFixed(2);
+    };
+
+    const getBonusUSD = () => {
+        const usd = parseFloat(getCurrentUSD());
+        if (usd >= BONUS_THRESHOLD) return (usd * BONUS_PERCENT / 100).toFixed(2);
+        return 0;
+    };
+
+    const getTotalUSD = () => {
+        const usd = parseFloat(getCurrentUSD());
+        const bonus = parseFloat(getBonusUSD());
+        return (usd + bonus).toFixed(2);
     };
 
     return (
@@ -332,6 +348,11 @@ const BillingPage = ({ user, stats, onBalanceUpdate }) => {
                                                         <Sparkles size={10} /> Phổ biến
                                                     </div>
                                                 )}
+                                                {pkg.bonus && (
+                                                    <div className="absolute -top-2.5 right-2 px-2 py-0.5 bg-amber-500 text-white text-[10px] font-black rounded-full">
+                                                        +{BONUS_PERCENT}%
+                                                    </div>
+                                                )}
                                                 <div className={`text-2xl font-black mb-1 ${selectedPackage?.amount === pkg.amount
                                                     ? 'text-emerald-400'
                                                     : isDark ? 'text-white' : 'text-slate-900'
@@ -341,6 +362,11 @@ const BillingPage = ({ user, stats, onBalanceUpdate }) => {
                                                 <div className={`text-xs font-bold ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
                                                     {formatVND(pkg.amount)}
                                                 </div>
+                                                {pkg.bonus && (
+                                                    <div className="text-[10px] font-bold text-amber-400 mt-1">
+                                                        → Nhận ${(pkg.usd * (1 + BONUS_PERCENT / 100)).toFixed(1)}
+                                                    </div>
+                                                )}
                                             </button>
                                         ))}
                                     </div>
@@ -361,9 +387,18 @@ const BillingPage = ({ user, stats, onBalanceUpdate }) => {
                                                 }`}
                                         />
                                         {customAmount && (
-                                            <p className="text-xs text-emerald-400 font-bold mt-1">
-                                                ≈ ${getCurrentUSD()} USD
-                                            </p>
+                                            <div className="mt-1 space-y-0.5">
+                                                <p className="text-xs text-emerald-400 font-bold">
+                                                    ≈ ${getCurrentUSD()} USD
+                                                    {parseFloat(getCurrentUSD()) >= BONUS_THRESHOLD && (
+                                                        <span className="text-amber-400 ml-2">+{BONUS_PERCENT}% bonus → ${getTotalUSD()}</span>
+                                                    )}
+                                                </p>
+                                                <p className="text-[10px] text-slate-500">
+                                                    Tỷ giá: 1 USD = {USD_RATE.toLocaleString()}đ
+                                                    {parseFloat(getCurrentUSD()) < BONUS_THRESHOLD && ` • Bonus ${BONUS_PERCENT}% khi nạp ≥ $${BONUS_THRESHOLD}`}
+                                                </p>
+                                            </div>
                                         )}
                                     </div>
                                 </div>

@@ -20,6 +20,7 @@ import {
     X
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext.jsx';
+import api from '../utils/api.js';
 import logo from '../assets/logo.png';
 import logoLight from '../assets/logo_light.png';
 
@@ -32,9 +33,9 @@ const LandingPage = ({ onLogin, onRegister }) => {
     ]);
 
     useEffect(() => {
-        fetch('http://127.0.0.1:5050/api/pricing') // Correct port
-            .then(res => res.json())
-            .then(data => {
+        api.get('/api/pricing')
+            .then(res => {
+                const data = res.data;
                 if (data.pricing && data.pricing.length > 0) {
                     setPricing(data.pricing);
                 }
@@ -176,7 +177,7 @@ const LandingPage = ({ onLogin, onRegister }) => {
                     )}
                 </AnimatePresence>
 
-                <div className="relative z-10 max-w-7xl mx-auto px-6 pt-20 pb-32 text-center">
+                <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 pt-12 sm:pt-20 pb-20 sm:pb-32 text-center">
                     <motion.div
                         initial={{ opacity: 0, y: 30 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -207,7 +208,7 @@ const LandingPage = ({ onLogin, onRegister }) => {
                             </span>
                         </h2>
 
-                        <p className={`text-xl max-w-2xl mx-auto mb-10 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                        <p className={`text-base sm:text-xl max-w-2xl mx-auto mb-8 sm:mb-10 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                             API giải ReCaptcha tự động hàng đầu Việt Nam. Hỗ trợ ReCaptcha V2, V3
                             với tốc độ nhanh nhất thị trường và tỷ lệ thành công 99.9%.
                         </p>
@@ -248,7 +249,7 @@ const LandingPage = ({ onLogin, onRegister }) => {
                                 transition={{ delay: idx * 0.1 }}
                                 className="text-center"
                             >
-                                <div className={`text-4xl md:text-5xl font-black mb-2 ${isDark
+                                <div className={`text-3xl sm:text-4xl md:text-5xl font-black mb-2 ${isDark
                                     ? 'text-white'
                                     : 'bg-gradient-to-r from-sky-600 to-indigo-600 bg-clip-text text-transparent'}`}>
                                     {stat.value}
@@ -349,7 +350,7 @@ const LandingPage = ({ onLogin, onRegister }) => {
                                     {plan.description}
                                 </p>
                                 <div className="mb-4">
-                                    <span className={`text-5xl font-black ${isDark ? 'text-sky-400' : 'text-sky-600'}`}>
+                                    <span className={`text-4xl sm:text-5xl font-black ${isDark ? 'text-sky-400' : 'text-sky-600'}`}>
                                         ${plan.price}
                                     </span>
                                     <span className={`text-sm ml-1 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
@@ -398,12 +399,12 @@ const LandingPage = ({ onLogin, onRegister }) => {
                         initial={{ opacity: 0, y: 20 }}
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: true }}
-                        className={`text-center p-12 rounded-3xl ${isDark
+                        className={`text-center p-8 sm:p-12 rounded-3xl ${isDark
                             ? 'bg-gradient-to-br from-sky-500/10 to-indigo-500/10 border border-sky-500/20'
                             : 'bg-gradient-to-br from-sky-500 to-indigo-600 shadow-2xl shadow-sky-500/30'}`}
                     >
                         <Zap className={`mx-auto mb-6 ${isDark ? 'text-sky-400' : 'text-white/90'}`} size={48} />
-                        <h3 className={`text-3xl font-black mb-4 ${isDark ? 'text-white' : 'text-white'}`}>
+                        <h3 className={`text-2xl sm:text-3xl font-black mb-4 ${isDark ? 'text-white' : 'text-white'}`}>
                             Sẵn sàng tự động hóa?
                         </h3>
                         <p className={`mb-8 max-w-xl mx-auto ${isDark ? 'text-slate-400' : 'text-white/80'}`}>

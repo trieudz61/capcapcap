@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Zap,
@@ -16,7 +16,9 @@ import {
     EyeOff,
     Sun,
     Moon,
-    Globe
+    Globe,
+    RefreshCw,
+    KeyRound
 } from 'lucide-react';
 import api from '../utils/api.js';
 import { useTheme } from '../context/ThemeContext.jsx';
@@ -39,6 +41,95 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
+    // Email verification state
+    const [showVerification, setShowVerification] = useState(false);
+    const [verificationEmail, setVerificationEmail] = useState('');
+    const [otpCode, setOtpCode] = useState(['', '', '', '', '', '']);
+    const [resendCooldown, setResendCooldown] = useState(0);
+    const [googleLoading, setGoogleLoading] = useState(false);
+    const [googleReady, setGoogleReady] = useState(false);
+    const otpRefs = useRef([]);
+    const googleContainerRef = useRef(null);
+
+    // Forgot password state
+    const [showForgotPassword, setShowForgotPassword] = useState(false);
+    const [forgotStep, setForgotStep] = useState(1); // 1=email, 2=code, 3=new password
+    const [forgotEmail, setForgotEmail] = useState('');
+    const [forgotOtp, setForgotOtp] = useState(['', '', '', '', '', '']);
+    const [forgotNewPassword, setForgotNewPassword] = useState('');
+    const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+    const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
+    const forgotOtpRefs = useRef([]);
+
+    // Resend cooldown timer
+    useEffect(() => {
+        if (resendCooldown > 0) {
+            const timer = setTimeout(() => setResendCooldown(resendCooldown - 1), 1000);
+            return () => clearTimeout(timer);
+        }
+    }, [resendCooldown]);
+
+    // Google Identity Services callback
+    const handleGoogleCredential = async (response) => {
+        setGoogleLoading(true);
+        setError('');
+        setSuccess('');
+
+        try {
+            const { data } = await api.post('/auth/google', {
+                credential: response.credential
+            });
+            localStorage.setItem('token', data.token);
+            onLoginSuccess(data.user);
+        } catch (err) {
+            const errMsg = err.response?.data?.error || 'Đăng nhập Google thất bại. Vui lòng thử lại.';
+            setError(errMsg);
+        } finally {
+            setGoogleLoading(false);
+        }
+    };
+
+    // Initialize Google Sign-In
+    useEffect(() => {
+        const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+        if (!googleClientId || googleClientId === 'YOUR_GOOGLE_CLIENT_ID_HERE') return;
+        if (!isLogin) return;
+
+        const tryInit = () => {
+            if (window.google?.accounts?.id && googleContainerRef.current) {
+                window.google.accounts.id.initialize({
+                    client_id: googleClientId,
+                    callback: handleGoogleCredential,
+                    auto_select: false,
+                    cancel_on_tap_outside: true
+                });
+                // Clear previous render
+                googleContainerRef.current.innerHTML = '';
+                window.google.accounts.id.renderButton(googleContainerRef.current, {
+                    type: 'standard',
+                    theme: isDark ? 'filled_black' : 'outline',
+                    size: 'large',
+                    text: 'signin_with',
+                    shape: 'pill',
+                    width: googleContainerRef.current.offsetWidth || 340
+                });
+                setGoogleReady(true);
+                return true;
+            }
+            return false;
+        };
+
+        // Retry until both Google SDK and DOM element are ready
+        if (!tryInit()) {
+            const checkInterval = setInterval(() => {
+                if (tryInit()) {
+                    clearInterval(checkInterval);
+                }
+            }, 200);
+            return () => clearInterval(checkInterval);
+        }
+    }, [isLogin, isDark]);
+
     const handleInputChange = (e) => {
         const { name, value, type, checked } = e.target;
         setFormData(prev => ({
@@ -47,14 +138,56 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
         }));
     };
 
+    // ============================================
+    // OTP Input Handlers
+    // ============================================
+    const handleOtpChange = (index, value) => {
+        if (!/^\d*$/.test(value)) return; // Only numbers
+        const newOtp = [...otpCode];
+        newOtp[index] = value.slice(-1); // Only last digit
+        setOtpCode(newOtp);
+
+        // Auto-focus next input
+        if (value && index < 5) {
+            otpRefs.current[index + 1]?.focus();
+        }
+    };
+
+    const handleOtpKeyDown = (index, e) => {
+        if (e.key === 'Backspace' && !otpCode[index] && index > 0) {
+            otpRefs.current[index - 1]?.focus();
+        }
+    };
+
+    const handleOtpPaste = (e) => {
+        e.preventDefault();
+        const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+        const newOtp = [...otpCode];
+        for (let i = 0; i < 6; i++) {
+            newOtp[i] = pasted[i] || '';
+        }
+        setOtpCode(newOtp);
+        if (pasted.length >= 6) {
+            otpRefs.current[5]?.focus();
+        }
+    };
+
+    // ============================================
+    // Submit Registration / Login
+    // ============================================
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
         setError('');
         setSuccess('');
 
-        // Basic Validation
+        // Validation for registration
         if (!isLogin) {
+            if (!formData.email) {
+                setError('Email là bắt buộc');
+                setLoading(false);
+                return;
+            }
             if (formData.password !== formData.confirmPassword) {
                 setError(t('passwordsNotMatch'));
                 setLoading(false);
@@ -72,9 +205,10 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
             const payload = isLogin
                 ? { username: formData.email, password: formData.password }
                 : {
-                    username: formData.username || formData.email,
+                    username: formData.username || formData.email.split('@')[0],
                     password: formData.password,
-                    fullName: formData.fullName
+                    fullName: formData.fullName,
+                    email: formData.email
                 };
 
             const { data } = await api.post(endpoint, payload);
@@ -83,17 +217,574 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
                 localStorage.setItem('token', data.token);
                 onLoginSuccess(data.user);
             } else {
-                setSuccess(t('accountCreated'));
-                setIsLogin(true);
-                setFormData(prev => ({ ...prev, email: prev.username, password: '', confirmPassword: '' }));
+                // Show verification screen
+                setVerificationEmail(formData.email);
+                setShowVerification(true);
+                setResendCooldown(60);
+                setSuccess('');
             }
         } catch (err) {
-            setError(err.response?.data?.error || t('authFailed'));
+            const errData = err.response?.data;
+            // If login blocked due to unverified email
+            if (errData?.requireVerification && errData?.email) {
+                setVerificationEmail(errData.email);
+                setShowVerification(true);
+                setResendCooldown(0);
+                setError('');
+                return;
+            }
+            setError(errData?.error || t('authFailed'));
         } finally {
             setLoading(false);
         }
     };
 
+    // ============================================
+    // Verify OTP Code
+    // ============================================
+    const handleVerifyOTP = async () => {
+        const code = otpCode.join('');
+        if (code.length !== 6) {
+            setError('Vui lòng nhập đủ 6 số');
+            return;
+        }
+
+        setLoading(true);
+        setError('');
+
+        try {
+            await api.post('/auth/verify-email', { email: verificationEmail, code });
+            setSuccess('Xác thực email thành công! Đang đăng nhập...');
+
+            // Auto-login after verification
+            setTimeout(async () => {
+                try {
+                    const { data } = await api.post('/auth/login', {
+                        username: verificationEmail,
+                        password: formData.password
+                    });
+                    localStorage.setItem('token', data.token);
+                    onLoginSuccess(data.user);
+                } catch {
+                    setShowVerification(false);
+                    setIsLogin(true);
+                    setSuccess('Xác thực thành công! Vui lòng đăng nhập.');
+                }
+            }, 1500);
+        } catch (err) {
+            setError(err.response?.data?.error || 'Xác thực thất bại');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // ============================================
+    // Resend verification code
+    // ============================================
+    const handleResendCode = async () => {
+        if (resendCooldown > 0) return;
+
+        try {
+            await api.post('/auth/resend-code', { email: verificationEmail });
+            setResendCooldown(60);
+            setOtpCode(['', '', '', '', '', '']);
+            setSuccess('Đã gửi lại mã xác thực!');
+            setError('');
+            setTimeout(() => setSuccess(''), 3000);
+        } catch (err) {
+            setError(err.response?.data?.error || 'Không thể gửi lại mã');
+        }
+    };
+
+    // ============================================
+    // Forgot Password Handlers
+    // ============================================
+    const handleForgotOtpChange = (index, value) => {
+        if (!/^\d*$/.test(value)) return;
+        const newOtp = [...forgotOtp];
+        newOtp[index] = value.slice(-1);
+        setForgotOtp(newOtp);
+        if (value && index < 5) {
+            forgotOtpRefs.current[index + 1]?.focus();
+        }
+    };
+
+    const handleForgotOtpKeyDown = (index, e) => {
+        if (e.key === 'Backspace' && !forgotOtp[index] && index > 0) {
+            forgotOtpRefs.current[index - 1]?.focus();
+        }
+    };
+
+    const handleForgotOtpPaste = (e) => {
+        e.preventDefault();
+        const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+        const newOtp = [...forgotOtp];
+        for (let i = 0; i < 6; i++) {
+            newOtp[i] = pasted[i] || '';
+        }
+        setForgotOtp(newOtp);
+        if (pasted.length >= 6) forgotOtpRefs.current[5]?.focus();
+    };
+
+    const handleForgotSendCode = async () => {
+        if (!forgotEmail) {
+            setError('Vui lòng nhập email');
+            return;
+        }
+        setLoading(true);
+        setError('');
+        setSuccess('');
+        try {
+            const { data } = await api.post('/auth/forgot-password', { email: forgotEmail });
+            setSuccess(data.message || 'Mã đặt lại đã được gửi đến email của bạn.');
+            setForgotStep(2);
+            setResendCooldown(60);
+        } catch (err) {
+            setError(err.response?.data?.error || 'Không thể gửi mã. Vui lòng thử lại.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleForgotVerifyCode = async () => {
+        const code = forgotOtp.join('');
+        if (code.length !== 6) {
+            setError('Vui lòng nhập đủ 6 số');
+            return;
+        }
+        // Move to step 3 (enter new password), we verify the code when submitting the new password
+        setError('');
+        setSuccess('');
+        setForgotStep(3);
+    };
+
+    const handleForgotResetPassword = async () => {
+        if (!forgotNewPassword || !forgotConfirmPassword) {
+            setError('Vui lòng nhập mật khẩu mới');
+            return;
+        }
+        if (forgotNewPassword.length < 6) {
+            setError('Mật khẩu mới phải có ít nhất 6 ký tự');
+            return;
+        }
+        if (forgotNewPassword !== forgotConfirmPassword) {
+            setError('Mật khẩu xác nhận không khớp');
+            return;
+        }
+        setLoading(true);
+        setError('');
+        try {
+            const code = forgotOtp.join('');
+            const { data } = await api.post('/auth/reset-password', {
+                email: forgotEmail,
+                code,
+                newPassword: forgotNewPassword
+            });
+            setSuccess(data.message || 'Đặt lại mật khẩu thành công!');
+            // Auto go back to login after 2s
+            setTimeout(() => {
+                setShowForgotPassword(false);
+                setForgotStep(1);
+                setForgotEmail('');
+                setForgotOtp(['', '', '', '', '', '']);
+                setForgotNewPassword('');
+                setForgotConfirmPassword('');
+                setIsLogin(true);
+                setError('');
+                setSuccess('Đặt lại mật khẩu thành công! Hãy đăng nhập.');
+            }, 2000);
+        } catch (err) {
+            setError(err.response?.data?.error || 'Đặt lại mật khẩu thất bại');
+            // If code is wrong/expired, go back to step 2
+            if (err.response?.data?.error?.includes('Mã') || err.response?.data?.error?.includes('hết hạn')) {
+                setForgotStep(2);
+                setForgotOtp(['', '', '', '', '', '']);
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleForgotResendCode = async () => {
+        if (resendCooldown > 0) return;
+        try {
+            await api.post('/auth/forgot-password', { email: forgotEmail });
+            setResendCooldown(60);
+            setForgotOtp(['', '', '', '', '', '']);
+            setSuccess('Đã gửi lại mã đặt lại mật khẩu!');
+            setError('');
+            setTimeout(() => setSuccess(''), 3000);
+        } catch (err) {
+            setError(err.response?.data?.error || 'Không thể gửi lại mã');
+        }
+    };
+
+    const closeForgotPassword = () => {
+        setShowForgotPassword(false);
+        setForgotStep(1);
+        setForgotEmail('');
+        setForgotOtp(['', '', '', '', '', '']);
+        setForgotNewPassword('');
+        setForgotConfirmPassword('');
+        setError('');
+        setSuccess('');
+    };
+
+    // ============================================
+    // Forgot Password Screen
+    // ============================================
+    if (showForgotPassword) {
+        return (
+            <div className={`min-h-screen ${isDark ? 'bg-[#030712]' : 'bg-slate-100'} flex items-center justify-center p-4 relative overflow-hidden`}>
+                <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-amber-500/5 rounded-full blur-[120px]"></div>
+                <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-orange-500/5 rounded-full blur-[120px]"></div>
+
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className={`w-full max-w-md p-8 sm:p-10 rounded-[32px] border relative z-10 ${isDark
+                        ? 'bg-[#080c17]/80 border-slate-800/50 backdrop-blur-xl'
+                        : 'bg-white/90 border-slate-200 backdrop-blur-xl shadow-2xl'
+                        }`}
+                >
+                    {/* Logo */}
+                    <div className="flex items-center justify-center gap-2 mb-8">
+                        <img
+                            src={isDark ? logo : logoLight}
+                            alt="Recap1s"
+                            className={`w-10 h-10 object-contain ${isDark ? 'mix-blend-screen filter drop-shadow-[0_0_10px_rgba(56,189,248,0.4)]' : 'mix-blend-multiply'}`}
+                        />
+                        <span className={`text-2xl font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                            Recap<span className="text-sky-500">1s</span>
+                        </span>
+                    </div>
+
+                    {/* Icon */}
+                    <div className="flex justify-center mb-6">
+                        <motion.div
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ type: 'spring', delay: 0.1 }}
+                            className="w-20 h-20 rounded-full bg-amber-500/10 flex items-center justify-center"
+                        >
+                            <KeyRound size={36} className="text-amber-400" />
+                        </motion.div>
+                    </div>
+
+                    <h2 className={`text-2xl font-bold text-center mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        {forgotStep === 1 ? 'Quên Mật Khẩu' : forgotStep === 2 ? 'Nhập Mã Xác Thực' : 'Đặt Mật Khẩu Mới'}
+                    </h2>
+                    <p className={`text-sm text-center mb-8 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                        {forgotStep === 1
+                            ? 'Nhập email để nhận mã đặt lại mật khẩu'
+                            : forgotStep === 2
+                                ? <>Chúng tôi đã gửi mã 6 số đến{' '}<strong className={isDark ? 'text-amber-400' : 'text-amber-600'}>{forgotEmail}</strong></>
+                                : 'Nhập mật khẩu mới cho tài khoản của bạn'
+                        }
+                    </p>
+
+                    {/* Step 1: Enter Email */}
+                    {forgotStep === 1 && (
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+                            <div>
+                                <label className={`text-[10px] font-black ${isDark ? 'text-slate-500' : 'text-slate-600'} uppercase tracking-widest`}>EMAIL</label>
+                                <div className="relative mt-1">
+                                    <Mail size={16} className={`absolute left-4 top-1/2 -translate-y-1/2 ${isDark ? 'text-slate-600' : 'text-slate-400'}`} />
+                                    <input
+                                        type="email"
+                                        value={forgotEmail}
+                                        onChange={(e) => setForgotEmail(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleForgotSendCode()}
+                                        placeholder="your@email.com"
+                                        className={`w-full pl-11 pr-4 py-3.5 rounded-xl text-sm font-medium outline-none transition-all border ${isDark
+                                            ? 'bg-slate-900/50 text-white border-slate-800 focus:border-amber-500 placeholder-slate-700'
+                                            : 'bg-slate-50 text-slate-900 border-slate-200 focus:border-amber-500 placeholder-slate-400'
+                                            } focus:ring-4 focus:ring-amber-500/10`}
+                                    />
+                                </div>
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {/* Step 2: Enter OTP Code */}
+                    {forgotStep === 2 && (
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                            <div className="flex justify-center gap-2 sm:gap-3 mb-4">
+                                {forgotOtp.map((digit, index) => (
+                                    <input
+                                        key={index}
+                                        ref={(el) => forgotOtpRefs.current[index] = el}
+                                        type="text"
+                                        inputMode="numeric"
+                                        maxLength={1}
+                                        value={digit}
+                                        onChange={(e) => handleForgotOtpChange(index, e.target.value)}
+                                        onKeyDown={(e) => handleForgotOtpKeyDown(index, e)}
+                                        onPaste={index === 0 ? handleForgotOtpPaste : undefined}
+                                        className={`w-12 h-14 sm:w-14 sm:h-16 text-center text-2xl font-black rounded-xl outline-none transition-all border-2 ${isDark
+                                            ? `bg-slate-900/50 text-white ${digit ? 'border-amber-500' : 'border-slate-800'} focus:border-amber-400`
+                                            : `bg-slate-50 text-slate-900 ${digit ? 'border-amber-500' : 'border-slate-300'} focus:border-amber-500`
+                                            } focus:ring-4 focus:ring-amber-500/10`}
+                                    />
+                                ))}
+                            </div>
+
+                            {/* Resend */}
+                            <div className="text-center mb-4">
+                                <button
+                                    onClick={handleForgotResendCode}
+                                    disabled={resendCooldown > 0}
+                                    className={`inline-flex items-center gap-1.5 text-xs font-bold transition-colors ${resendCooldown > 0
+                                        ? isDark ? 'text-slate-600' : 'text-slate-400'
+                                        : 'text-amber-400 hover:text-amber-300'
+                                        }`}
+                                >
+                                    <RefreshCw size={12} />
+                                    {resendCooldown > 0 ? `Gửi lại sau ${resendCooldown}s` : 'Gửi Lại Mã'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {/* Step 3: New Password */}
+                    {forgotStep === 3 && (
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+                            <div>
+                                <label className={`text-[10px] font-black ${isDark ? 'text-slate-500' : 'text-slate-600'} uppercase tracking-widest`}>MẬT KHẨU MỚI</label>
+                                <div className="relative mt-1">
+                                    <Lock size={16} className={`absolute left-4 top-1/2 -translate-y-1/2 ${isDark ? 'text-slate-600' : 'text-slate-400'}`} />
+                                    <input
+                                        type={showForgotNewPassword ? 'text' : 'password'}
+                                        value={forgotNewPassword}
+                                        onChange={(e) => setForgotNewPassword(e.target.value)}
+                                        placeholder="Ít nhất 6 ký tự"
+                                        className={`w-full pl-11 pr-12 py-3.5 rounded-xl text-sm font-medium outline-none transition-all border ${isDark
+                                            ? 'bg-slate-900/50 text-white border-slate-800 focus:border-amber-500 placeholder-slate-700'
+                                            : 'bg-slate-50 text-slate-900 border-slate-200 focus:border-amber-500 placeholder-slate-400'
+                                            } focus:ring-4 focus:ring-amber-500/10`}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowForgotNewPassword(!showForgotNewPassword)}
+                                        className={`absolute right-4 top-1/2 -translate-y-1/2 ${isDark ? 'text-slate-600 hover:text-slate-400' : 'text-slate-400 hover:text-slate-600'}`}
+                                    >
+                                        {showForgotNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                    </button>
+                                </div>
+                            </div>
+                            <div>
+                                <label className={`text-[10px] font-black ${isDark ? 'text-slate-500' : 'text-slate-600'} uppercase tracking-widest`}>XÁC NHẬN MẬT KHẨU</label>
+                                <div className="relative mt-1">
+                                    <Lock size={16} className={`absolute left-4 top-1/2 -translate-y-1/2 ${isDark ? 'text-slate-600' : 'text-slate-400'}`} />
+                                    <input
+                                        type="password"
+                                        value={forgotConfirmPassword}
+                                        onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleForgotResetPassword()}
+                                        placeholder="Nhập lại mật khẩu mới"
+                                        className={`w-full pl-11 pr-4 py-3.5 rounded-xl text-sm font-medium outline-none transition-all border ${isDark
+                                            ? 'bg-slate-900/50 text-white border-slate-800 focus:border-amber-500 placeholder-slate-700'
+                                            : 'bg-slate-50 text-slate-900 border-slate-200 focus:border-amber-500 placeholder-slate-400'
+                                            } focus:ring-4 focus:ring-amber-500/10`}
+                                    />
+                                </div>
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {/* Error / Success */}
+                    <AnimatePresence>
+                        {error && (
+                            <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex items-center gap-2 text-rose-400 text-xs bg-rose-500/5 p-3 rounded-xl border border-rose-500/10 mt-4">
+                                <AlertCircle size={14} className="shrink-0" /> {error}
+                            </motion.div>
+                        )}
+                        {success && (
+                            <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex items-center gap-2 text-emerald-400 text-xs bg-emerald-500/5 p-3 rounded-xl border border-emerald-500/10 mt-4">
+                                <CheckCircle2 size={14} className="shrink-0" /> {success}
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* Action Button */}
+                    <button
+                        onClick={
+                            forgotStep === 1 ? handleForgotSendCode
+                            : forgotStep === 2 ? handleForgotVerifyCode
+                            : handleForgotResetPassword
+                        }
+                        disabled={loading || (forgotStep === 2 && forgotOtp.join('').length !== 6)}
+                        className="w-full mt-6 py-4 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all shadow-xl shadow-amber-500/20 active:scale-[0.98] disabled:opacity-50"
+                    >
+                        {loading ? 'Đang xử lý...' : (
+                            <>
+                                {forgotStep === 1 && <><Mail size={18} /> Gửi Mã Xác Thực</>}
+                                {forgotStep === 2 && <><ShieldCheck size={18} /> Xác Nhận Mã</>}
+                                {forgotStep === 3 && <><KeyRound size={18} /> Đặt Lại Mật Khẩu</>}
+                            </>
+                        )}
+                    </button>
+
+                    {/* Step indicator */}
+                    <div className="flex justify-center gap-2 mt-6">
+                        {[1, 2, 3].map(step => (
+                            <div
+                                key={step}
+                                className={`w-8 h-1 rounded-full transition-all ${step <= forgotStep
+                                    ? 'bg-amber-500'
+                                    : isDark ? 'bg-slate-800' : 'bg-slate-200'
+                                    }`}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Back */}
+                    <div className="mt-6 text-center">
+                        <button
+                            onClick={forgotStep > 1 ? () => { setForgotStep(forgotStep - 1); setError(''); setSuccess(''); } : closeForgotPassword}
+                            className={`text-xs font-bold ${isDark ? 'text-slate-500 hover:text-white' : 'text-slate-500 hover:text-slate-900'} transition-colors`}
+                        >
+                            ← {forgotStep > 1 ? 'Quay lại bước trước' : 'Quay lại đăng nhập'}
+                        </button>
+                    </div>
+                </motion.div>
+            </div>
+        );
+    }
+
+    // ============================================
+    // Verification Screen (OTP Input)
+    // ============================================
+    if (showVerification) {
+        return (
+            <div className={`min-h-screen ${isDark ? 'bg-[#030712]' : 'bg-slate-100'} flex items-center justify-center p-4 relative overflow-hidden`}>
+                <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-sky-500/5 rounded-full blur-[120px]"></div>
+                <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-500/5 rounded-full blur-[120px]"></div>
+
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className={`w-full max-w-md p-8 sm:p-10 rounded-[32px] border relative z-10 ${isDark
+                        ? 'bg-[#080c17]/80 border-slate-800/50 backdrop-blur-xl'
+                        : 'bg-white/90 border-slate-200 backdrop-blur-xl shadow-2xl'
+                        }`}
+                >
+                    {/* Logo */}
+                    <div className="flex items-center justify-center gap-2 mb-8">
+                        <img
+                            src={isDark ? logo : logoLight}
+                            alt="Recap1s"
+                            className={`w-10 h-10 object-contain ${isDark ? 'mix-blend-screen filter drop-shadow-[0_0_10px_rgba(56,189,248,0.4)]' : 'mix-blend-multiply'}`}
+                        />
+                        <span className={`text-2xl font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                            Recap<span className="text-sky-500">1s</span>
+                        </span>
+                    </div>
+
+                    {/* Mail Icon */}
+                    <div className="flex justify-center mb-6">
+                        <motion.div
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ type: 'spring', delay: 0.1 }}
+                            className="w-20 h-20 rounded-full bg-sky-500/10 flex items-center justify-center"
+                        >
+                            <Mail size={36} className="text-sky-400" />
+                        </motion.div>
+                    </div>
+
+                    <h2 className={`text-2xl font-bold text-center mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        Xác Thực Email
+                    </h2>
+                    <p className={`text-sm text-center mb-8 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                        Chúng tôi đã gửi mã 6 số đến{' '}
+                        <strong className={isDark ? 'text-sky-400' : 'text-sky-600'}>{verificationEmail}</strong>
+                    </p>
+
+                    {/* OTP Inputs */}
+                    <div className="flex justify-center gap-2 sm:gap-3 mb-8">
+                        {otpCode.map((digit, index) => (
+                            <input
+                                key={index}
+                                ref={(el) => otpRefs.current[index] = el}
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={1}
+                                value={digit}
+                                onChange={(e) => handleOtpChange(index, e.target.value)}
+                                onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                                onPaste={index === 0 ? handleOtpPaste : undefined}
+                                className={`w-12 h-14 sm:w-14 sm:h-16 text-center text-2xl font-black rounded-xl outline-none transition-all border-2 ${isDark
+                                    ? `bg-slate-900/50 text-white ${digit ? 'border-sky-500' : 'border-slate-800'} focus:border-sky-400`
+                                    : `bg-slate-50 text-slate-900 ${digit ? 'border-sky-500' : 'border-slate-300'} focus:border-sky-500`
+                                    } focus:ring-4 focus:ring-sky-500/10`}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Error / Success */}
+                    <AnimatePresence>
+                        {error && (
+                            <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex items-center gap-2 text-rose-400 text-xs bg-rose-500/5 p-3 rounded-xl border border-rose-500/10 mb-4">
+                                <AlertCircle size={14} className="shrink-0" /> {error}
+                            </motion.div>
+                        )}
+                        {success && (
+                            <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex items-center gap-2 text-emerald-400 text-xs bg-emerald-500/5 p-3 rounded-xl border border-emerald-500/10 mb-4">
+                                <CheckCircle2 size={14} className="shrink-0" /> {success}
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* Verify Button */}
+                    <button
+                        onClick={handleVerifyOTP}
+                        disabled={loading || otpCode.join('').length !== 6}
+                        className="w-full py-4 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all shadow-xl shadow-sky-500/20 active:scale-[0.98] disabled:opacity-50"
+                    >
+                        {loading ? 'Đang xác thực...' : (
+                            <>
+                                <ShieldCheck size={18} />
+                                Xác Thực
+                            </>
+                        )}
+                    </button>
+
+                    {/* Resend */}
+                    <div className="mt-6 text-center">
+                        <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'} mb-2`}>
+                            Không nhận được mã?
+                        </p>
+                        <button
+                            onClick={handleResendCode}
+                            disabled={resendCooldown > 0}
+                            className={`inline-flex items-center gap-1.5 text-sm font-bold transition-colors ${resendCooldown > 0
+                                ? isDark ? 'text-slate-600' : 'text-slate-400'
+                                : 'text-sky-400 hover:text-sky-300'
+                                }`}
+                        >
+                            <RefreshCw size={14} />
+                            {resendCooldown > 0 ? `Gửi lại sau ${resendCooldown}s` : 'Gửi Lại Mã'}
+                        </button>
+                    </div>
+
+                    {/* Back to login */}
+                    <div className="mt-6 text-center">
+                        <button
+                            onClick={() => { setShowVerification(false); setIsLogin(true); setError(''); setSuccess(''); }}
+                            className={`text-xs font-bold ${isDark ? 'text-slate-500 hover:text-white' : 'text-slate-500 hover:text-slate-900'} transition-colors`}
+                        >
+                            ← Quay lại đăng nhập
+                        </button>
+                    </div>
+                </motion.div>
+            </div>
+        );
+    }
+
+    // ============================================
+    // Main Login / Register Form
+    // ============================================
     return (
         <div className={`min-h-screen ${isDark ? 'bg-[#030712]' : 'bg-slate-100'} text-white flex items-center justify-center p-4 lg:p-8 relative overflow-hidden`}>
             {/* Cosmic Background Elements */}
@@ -218,7 +909,7 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
                                 className="space-y-4"
                             >
                                 {!isLogin && (
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div className="space-y-1.5">
                                             <label className={`text-[10px] font-black ${isDark ? 'text-slate-500' : 'text-slate-600'} uppercase tracking-widest`}>{t('fullName')}</label>
                                             <div className="relative">
@@ -243,7 +934,6 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
                                                     value={formData.username}
                                                     onChange={handleInputChange}
                                                     placeholder="username"
-                                                    required={!isLogin}
                                                     className={`w-full ${isDark ? 'bg-slate-900/50 border-slate-800 text-white' : 'bg-slate-100 border-slate-300 text-slate-900'} border rounded-xl py-3 pl-10 pr-4 text-sm outline-none focus:border-sky-500/50 focus:ring-4 focus:ring-sky-500/5 transition-all`}
                                                 />
                                             </div>
@@ -252,7 +942,7 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
                                 )}
 
                                 <div className="space-y-1.5">
-                                    <label className={`text-[10px] font-black ${isDark ? 'text-slate-500' : 'text-slate-600'} uppercase tracking-widest`}>{isLogin ? t('username') : 'Email'}</label>
+                                    <label className={`text-[10px] font-black ${isDark ? 'text-slate-500' : 'text-slate-600'} uppercase tracking-widest`}>{isLogin ? t('username') + ' / Email' : 'Email'}</label>
                                     <div className="relative">
                                         <Mail className="absolute left-4 top-3 text-slate-500" size={16} />
                                         <input
@@ -260,7 +950,7 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
                                             name="email"
                                             value={formData.email}
                                             onChange={handleInputChange}
-                                            placeholder={isLogin ? 'username' : 'email@example.com'}
+                                            placeholder={isLogin ? 'username hoặc email' : 'email@example.com'}
                                             required
                                             className={`w-full ${isDark ? 'bg-slate-900/50 border-slate-800 text-white' : 'bg-slate-100 border-slate-300 text-slate-900'} border rounded-xl py-3 pl-11 pr-4 text-sm outline-none focus:border-sky-500/50 focus:ring-4 focus:ring-sky-500/5 transition-all`}
                                         />
@@ -314,7 +1004,7 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
 
                         {isLogin && (
                             <div className="flex justify-end">
-                                <button type="button" className="text-xs font-bold text-sky-400 hover:text-sky-300 hover:underline">{t('forgotPassword')}</button>
+                                <button type="button" onClick={() => { setShowForgotPassword(true); setError(''); setSuccess(''); }} className="text-xs font-bold text-sky-400 hover:text-sky-300 hover:underline">{t('forgotPassword')}</button>
                             </div>
                         )}
 
@@ -349,7 +1039,7 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
 
                             <button
                                 type="submit"
-                                disabled={loading}
+                                disabled={loading || googleLoading}
                                 className="w-full py-4 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all shadow-xl shadow-sky-500/20 active:scale-[0.98] disabled:opacity-50"
                             >
                                 {loading ? t('checking') : (
@@ -359,6 +1049,30 @@ const Auth = ({ onLoginSuccess, onBack, initialMode = 'login' }) => {
                                     </>
                                 )}
                             </button>
+
+                            {/* Google Sign-In Divider & Button */}
+                            {isLogin && (
+                                <>
+                                    <div className="flex items-center gap-4 my-2">
+                                        <div className={`flex-1 h-px ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}></div>
+                                        <span className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>hoặc</span>
+                                        <div className={`flex-1 h-px ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}></div>
+                                    </div>
+
+                                    <div
+                                        ref={googleContainerRef}
+                                        className="w-full flex items-center justify-center"
+                                        style={{ minHeight: '44px' }}
+                                    ></div>
+
+                                    {googleLoading && (
+                                        <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
+                                            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                                            Đang xác thực...
+                                        </div>
+                                    )}
+                                </>
+                            )}
                         </div>
                     </form>
 

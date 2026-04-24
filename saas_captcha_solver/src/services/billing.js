@@ -2,6 +2,7 @@ import db from '../utils/db.js';
 import logger from '../utils/logger.js';
 
 const RECAPTCHA_V2_COST = 0.0005; // $0.5 per 1000 requests
+const RECAPTCHA_V3_COST = 0.001;  // $1.0 per 1000 requests (harder to solve)
 
 // ============================================
 // ⚡ API Key Cache - In-Memory (RAM)
@@ -172,6 +173,8 @@ export async function deductBalance(userId, taskType, taskId, apiKey) {
     let cost = 0;
     if (taskType === 'ReCaptchaV2TaskProxyless') {
         cost = RECAPTCHA_V2_COST;
+    } else if (taskType === 'ReCaptchaV3TaskProxyless') {
+        cost = RECAPTCHA_V3_COST;
     }
 
     // Update cache locally so next validation sees updated balance

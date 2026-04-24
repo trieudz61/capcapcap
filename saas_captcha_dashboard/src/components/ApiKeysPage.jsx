@@ -46,7 +46,7 @@ const ApiKeysPage = ({ user, onKeyUpdate }) => {
     return (
         <div className="space-y-8">
             <div>
-                <h2 className="text-3xl font-extrabold text-white mb-2">{t('apiKeysTitle')}</h2>
+                <h2 className="text-2xl sm:text-3xl font-extrabold text-white mb-2">{t('apiKeysTitle')}</h2>
                 <p className="text-slate-500">{t('apiKeysDesc')}</p>
             </div>
 

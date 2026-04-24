@@ -20,12 +20,14 @@ import {
 import { useTheme } from '../context/ThemeContext.jsx';
 import api from '../utils/api.js';
 
-const SettingsPage = ({ user }) => {
+const SettingsPage = ({ user, onUserUpdate }) => {
     const { theme, setTheme, language, setLanguage, t, isDark } = useTheme();
     const [activeSection, setActiveSection] = useState('profile');
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
     const [showPasswords, setShowPasswords] = useState(false);
+    const [profileMsg, setProfileMsg] = useState({ type: '', text: '' });
+    const [passwordMsg, setPasswordMsg] = useState({ type: '', text: '' });
 
     // Profile state
     const [profile, setProfile] = useState({
@@ -47,35 +49,54 @@ const SettingsPage = ({ user }) => {
     });
 
     const handleSaveProfile = async () => {
+        setProfileMsg({ type: '', text: '' });
         setSaving(true);
         try {
-            await new Promise(r => setTimeout(r, 1000));
+            const res = await api.put('/auth/update-profile', {
+                fullName: profile.fullName,
+                email: profile.email
+            });
+            if (res.data.user && onUserUpdate) {
+                onUserUpdate(res.data.user);
+            }
             setSaved(true);
-            setTimeout(() => setSaved(false), 2000);
+            setProfileMsg({ type: 'success', text: res.data.message || 'Cập nhật thành công!' });
+            setTimeout(() => {
+                setSaved(false);
+                setProfileMsg({ type: '', text: '' });
+            }, 3000);
         } catch (err) {
-            alert('Lỗi khi lưu thông tin');
+            const msg = err.response?.data?.error || 'Lỗi khi lưu thông tin';
+            setProfileMsg({ type: 'error', text: msg });
         } finally {
             setSaving(false);
         }
     };
 
     const handleChangePassword = async () => {
+        setPasswordMsg({ type: '', text: '' });
+
         if (passwords.new !== passwords.confirm) {
-            alert(language === 'vi' ? 'Mật khẩu xác nhận không khớp!' : 'Passwords do not match!');
+            setPasswordMsg({ type: 'error', text: language === 'vi' ? 'Mật khẩu xác nhận không khớp!' : 'Passwords do not match!' });
             return;
         }
         if (passwords.new.length < 6) {
-            alert(language === 'vi' ? 'Mật khẩu mới phải có ít nhất 6 ký tự!' : 'Password must be at least 6 characters!');
+            setPasswordMsg({ type: 'error', text: language === 'vi' ? 'Mật khẩu mới phải có ít nhất 6 ký tự!' : 'Password must be at least 6 characters!' });
             return;
         }
 
         setSaving(true);
         try {
-            await new Promise(r => setTimeout(r, 1000));
-            alert(language === 'vi' ? '✅ Đổi mật khẩu thành công!' : '✅ Password changed successfully!');
+            const res = await api.put('/auth/change-password', {
+                currentPassword: passwords.current,
+                newPassword: passwords.new
+            });
+            setPasswordMsg({ type: 'success', text: res.data.message || '✅ Đổi mật khẩu thành công!' });
             setPasswords({ current: '', new: '', confirm: '' });
+            setTimeout(() => setPasswordMsg({ type: '', text: '' }), 3000);
         } catch (err) {
-            alert('Error');
+            const msg = err.response?.data?.error || 'Lỗi khi đổi mật khẩu';
+            setPasswordMsg({ type: 'error', text: msg });
         } finally {
             setSaving(false);
         }
@@ -91,7 +112,7 @@ const SettingsPage = ({ user }) => {
     return (
         <div className="space-y-8">
             <div>
-                <h2 className="text-3xl font-extrabold text-white mb-2">{t('settingsTitle')}</h2>
+                <h2 className="text-2xl sm:text-3xl font-extrabold text-white mb-2">{t('settingsTitle')}</h2>
                 <p className="text-slate-500">{t('settingsDesc')}</p>
             </div>
 
@@ -157,6 +178,12 @@ const SettingsPage = ({ user }) => {
                                 </div>
                             </div>
 
+                            {profileMsg.text && (
+                                <div className={`p-3 rounded-xl text-sm font-bold ${profileMsg.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
+                                    {profileMsg.text}
+                                </div>
+                            )}
+
                             <button
                                 onClick={handleSaveProfile}
                                 disabled={saving}
@@ -206,6 +233,12 @@ const SettingsPage = ({ user }) => {
                                     </div>
                                 ))}
                             </div>
+
+                            {passwordMsg.text && (
+                                <div className={`p-3 rounded-xl text-sm font-bold ${passwordMsg.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
+                                    {passwordMsg.text}
+                                </div>
+                            )}
 
                             <button
                                 onClick={handleChangePassword}

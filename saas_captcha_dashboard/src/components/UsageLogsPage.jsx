@@ -106,7 +106,7 @@ const UsageLogsPage = () => {
     return (
         <div className="space-y-8">
             <div>
-                <h2 className="text-3xl font-extrabold text-white mb-2">{t('usageLogsTitle')}</h2>
+                <h2 className="text-2xl sm:text-3xl font-extrabold text-white mb-2">{t('usageLogsTitle')}</h2>
                 <p className="text-slate-500">{t('usageLogsDesc')}</p>
             </div>
 
@@ -173,25 +173,25 @@ const UsageLogsPage = () => {
                         <table className="w-full">
                             <thead>
                                 <tr className="text-xs text-slate-500 uppercase tracking-widest border-b border-slate-800 bg-slate-900/50">
-                                    <th className="text-left p-4">Task ID</th>
-                                    <th className="text-left p-4">Type</th>
-                                    <th className="text-left p-4">Status</th>
-                                    <th className="text-left p-4">Cost</th>
-                                    <th className="text-left p-4">Time</th>
+                                    <th className="text-left p-2 sm:p-4 whitespace-nowrap">Task ID</th>
+                                    <th className="text-left p-2 sm:p-4 whitespace-nowrap">Type</th>
+                                    <th className="text-left p-2 sm:p-4 whitespace-nowrap">Status</th>
+                                    <th className="text-left p-2 sm:p-4 whitespace-nowrap">Cost</th>
+                                    <th className="text-left p-2 sm:p-4 whitespace-nowrap">Time</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {paginatedLogs.map((log, idx) => (
                                     <tr key={idx} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
-                                        <td className="p-4">
-                                            <code className="text-xs font-mono text-sky-400 bg-sky-500/10 px-2 py-1 rounded">
-                                                {log.task_id?.substring(0, 12)}...
+                                        <td className="p-2 sm:p-4">
+                                            <code className="text-xs font-mono text-sky-400 bg-sky-500/10 px-2 py-1 rounded whitespace-nowrap">
+                                                {log.task_id?.substring(0, 8)}...
                                             </code>
                                         </td>
-                                        <td className="p-4 text-sm text-slate-300">{log.task_type}</td>
-                                        <td className="p-4">{getStatusBadge(log.status)}</td>
-                                        <td className="p-4 text-sm font-mono text-rose-400">-${Number(log.cost).toFixed(4)}</td>
-                                        <td className="p-4 text-sm text-slate-500">{new Date(log.created_at).toLocaleString('vi-VN')}</td>
+                                        <td className="p-2 sm:p-4 text-xs sm:text-sm text-slate-300 whitespace-nowrap">{log.task_type}</td>
+                                        <td className="p-2 sm:p-4">{getStatusBadge(log.status)}</td>
+                                        <td className="p-2 sm:p-4 text-xs sm:text-sm font-mono text-rose-400 whitespace-nowrap">-${Number(log.cost).toFixed(4)}</td>
+                                        <td className="p-2 sm:p-4 text-xs sm:text-sm text-slate-500 whitespace-nowrap">{new Date(log.created_at).toLocaleString('vi-VN')}</td>
                                     </tr>
                                 ))}
                             </tbody>

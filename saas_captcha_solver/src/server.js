@@ -9,9 +9,11 @@ import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
 import { rateLimiter, securityHeaders, payloadLimiter, getRateLimitStats } from './middlewares/rateLimit.js';
 import { getTurnstileStats, shutdownTurnstilePool } from './services/turnstile.js';
+import db from './utils/db.js';
 
 const fastify = Fastify({
     logger: false,
+    trustProxy: true, // Trust Cloudflare Tunnel proxy headers (CF-Connecting-IP, X-Forwarded-For)
     bodyLimit: 50 * 1024, // 50KB max payload (Fastify built-in protection)
     connectionTimeout: 10_000, // 10s connection timeout (anti-slowloris)
     requestTimeout: 30_000, // 30s request timeout
@@ -26,6 +28,12 @@ fastify.register(jwt, {
 fastify.decorate('authenticate', async (request, reply) => {
     try {
         await request.jwtVerify();
+
+        // Check if account is locked (real-time check from DB)
+        const user = await db.get('SELECT is_locked FROM users WHERE id = ?', [request.user.id]);
+        if (user && user.is_locked) {
+            return reply.status(403).send({ error: 'Tài khoản đã bị khóa. Vui lòng liên hệ admin.' });
+        }
     } catch (err) {
         reply.send(err);
     }

@@ -78,52 +78,56 @@ export const exec = async (sql) => {
 /**
  * Transaction handler using libsql batch with transaction mode
  */
-export const withTransaction = async (workFn) => {
-    // libsql client supports transaction() method
-    const tx = await client.transaction('write');
-    try {
-        // Temporarily replace the global client methods to use transaction
-        const originalExecute = client.execute.bind(client);
-
-        // Override client.execute to use transaction during workFn
-        const txQuery = async (sql, params = []) => {
-            const result = await tx.execute({ sql, args: params });
-            return rowsToObjects(result);
-        };
-        const txGet = async (sql, params = []) => {
-            const result = await tx.execute({ sql, args: params });
-            const rows = rowsToObjects(result);
-            return rows.length > 0 ? rows[0] : undefined;
-        };
-        const txRun = async (sql, params = []) => {
-            const result = await tx.execute({ sql, args: params });
-            return {
-                id: Number(result.lastInsertRowid) || 0,
-                changes: result.rowsAffected || 0
+export const withTransaction = async (workFn, maxRetries = 3) => {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const tx = await client.transaction('write');
+        try {
+            const txQuery = async (sql, params = []) => {
+                const result = await tx.execute({ sql, args: params });
+                return rowsToObjects(result);
             };
-        };
+            const txGet = async (sql, params = []) => {
+                const result = await tx.execute({ sql, args: params });
+                const rows = rowsToObjects(result);
+                return rows.length > 0 ? rows[0] : undefined;
+            };
+            const txRun = async (sql, params = []) => {
+                const result = await tx.execute({ sql, args: params });
+                return {
+                    id: Number(result.lastInsertRowid) || 0,
+                    changes: result.rowsAffected || 0
+                };
+            };
 
-        // Temporarily swap exports for the duration of the transaction
-        const savedQuery = module_exports.query;
-        const savedGet = module_exports.get;
-        const savedRun = module_exports.run;
+            // Temporarily swap exports for the duration of the transaction
+            const savedQuery = module_exports.query;
+            const savedGet = module_exports.get;
+            const savedRun = module_exports.run;
 
-        module_exports.query = txQuery;
-        module_exports.get = txGet;
-        module_exports.run = txRun;
+            module_exports.query = txQuery;
+            module_exports.get = txGet;
+            module_exports.run = txRun;
 
-        const result = await workFn();
+            const result = await workFn();
 
-        // Restore originals
-        module_exports.query = savedQuery;
-        module_exports.get = savedGet;
-        module_exports.run = savedRun;
+            // Restore originals
+            module_exports.query = savedQuery;
+            module_exports.get = savedGet;
+            module_exports.run = savedRun;
 
-        await tx.commit();
-        return result;
-    } catch (err) {
-        await tx.rollback();
-        throw err;
+            await tx.commit();
+            return result;
+        } catch (err) {
+            try { await tx.rollback(); } catch (_) {}
+            const isRetryable = err.message?.includes('TRANSACTION_CLOSED')
+                || err.message?.includes('404')
+                || err.message?.includes('SERVER_ERROR');
+            if (isRetryable && attempt < maxRetries) {
+                await new Promise(r => setTimeout(r, 100 * attempt)); // backoff
+                continue;
+            }
+            throw err;
+        }
     }
 };
 
@@ -229,6 +233,32 @@ async function initSchema() {
         if (!hasLastLoginAt) await run("ALTER TABLE users ADD COLUMN last_login_at DATETIME");
         if (!hasLastLoginIp) await run("ALTER TABLE users ADD COLUMN last_login_ip TEXT");
 
+        // Email verification columns
+        const hasEmail = columns.some(c => c.name === 'email');
+        const hasEmailVerified = columns.some(c => c.name === 'email_verified');
+        const hasVerificationCode = columns.some(c => c.name === 'verification_code');
+        const hasVerificationExpires = columns.some(c => c.name === 'verification_expires');
+
+        if (!hasEmail) await run("ALTER TABLE users ADD COLUMN email TEXT");
+        if (!hasEmailVerified) await run("ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0");
+        if (!hasVerificationCode) await run("ALTER TABLE users ADD COLUMN verification_code TEXT");
+        if (!hasVerificationExpires) await run("ALTER TABLE users ADD COLUMN verification_expires DATETIME");
+
+        // Google OAuth column
+        const hasGoogleId = columns.some(c => c.name === 'google_id');
+        if (!hasGoogleId) await run("ALTER TABLE users ADD COLUMN google_id TEXT");
+
+        // Password reset columns
+        const hasResetCode = columns.some(c => c.name === 'reset_code');
+        const hasResetCodeExpires = columns.some(c => c.name === 'reset_code_expires');
+        if (!hasResetCode) await run("ALTER TABLE users ADD COLUMN reset_code TEXT");
+        if (!hasResetCodeExpires) await run("ALTER TABLE users ADD COLUMN reset_code_expires DATETIME");
+
+        // Auto-verify existing users (so admin isn't locked out)
+        if (!hasEmailVerified) {
+            await run("UPDATE users SET email_verified = 1 WHERE email_verified IS NULL OR email_verified = 0");
+        }
+
         // Seed default pricing if empty
         const pricingCount = await get("SELECT count(*) as count FROM pricing");
         if (pricingCount.count === 0) {
@@ -238,9 +268,23 @@ async function initSchema() {
             );
             await run(
                 "INSERT INTO pricing (name, price, unit, description, speed) VALUES (?, ?, ?, ?, ?)",
+                ['Turnstile', 0.001, 'solve', 'Cloudflare Turnstile (non-interactive & managed)', '~2s']
+            );
+            await run(
+                "INSERT INTO pricing (name, price, unit, description, speed) VALUES (?, ?, ?, ?, ?)",
                 ['ReCaptcha V3', 0.002, 'solve', 'Google reCaptcha v3 invisible', '1-2s']
             );
             logger.info('Default pricing seeded');
+        } else {
+            // Add Turnstile pricing if missing (for existing databases)
+            const hasTurnstile = await get("SELECT id FROM pricing WHERE name LIKE '%Turnstile%' OR name LIKE '%turnstile%'");
+            if (!hasTurnstile) {
+                await run(
+                    "INSERT INTO pricing (name, price, unit, description, speed) VALUES (?, ?, ?, ?, ?)",
+                    ['Turnstile', 0.001, 'solve', 'Cloudflare Turnstile (non-interactive & managed)', '~2s']
+                );
+                logger.info('Turnstile pricing added');
+            }
         }
 
         // Seed default notification if empty

@@ -1,19 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Zap, Globe, Key, Send, Copy, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
+import { Zap, Globe, Key, Send, Copy, CheckCircle2, Loader2, Sparkles, Shield, Clock } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext.jsx';
 import api from '../utils/api.js';
 
 const TrialPage = ({ user, onUserUpdate }) => {
     const { t, isDark } = useTheme();
+    const [captchaType, setCaptchaType] = useState('recaptcha');
     const [formData, setFormData] = useState({
         siteKey: '',
-        pageUrl: ''
+        pageUrl: '',
+        pageAction: ''
     });
+    const [isEnterprise, setIsEnterprise] = useState(false);
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState('');
     const [copied, setCopied] = useState(false);
     const [error, setError] = useState('');
+    const [solveTime, setSolveTime] = useState(null);
+    const [elapsedTime, setElapsedTime] = useState(0);
+    const timerRef = useRef(null);
+    const startTimeRef = useRef(null);
 
     const handleSolve = async (e) => {
         e.preventDefault();
@@ -25,15 +32,31 @@ const TrialPage = ({ user, onUserUpdate }) => {
         setLoading(true);
         setError('');
         setResult('');
+        setSolveTime(null);
+        setElapsedTime(0);
+        startTimeRef.current = Date.now();
+
+        // Start live timer
+        timerRef.current = setInterval(() => {
+            setElapsedTime(((Date.now() - startTimeRef.current) / 1000));
+        }, 100);
 
         try {
             // Step 1: Create Trial Task
+            const taskTypeMap = {
+                'recaptcha': 'ReCaptchaV2TaskProxyless',
+                'recaptchav3': 'ReCaptchaV3TaskProxyless',
+                'turnstile': 'TurnstileTaskProxyless'
+            };
+            const taskType = taskTypeMap[captchaType];
             const createTaskParams = {
                 clientKey: user.api_key,
                 task: {
-                    type: "ReCaptchaV2TaskProxyless",
+                    type: taskType,
                     websiteURL: formData.pageUrl,
-                    websiteKey: formData.siteKey
+                    websiteKey: formData.siteKey,
+                    ...(captchaType === 'recaptchav3' && formData.pageAction ? { pageAction: formData.pageAction } : {}),
+                    ...(captchaType === 'recaptchav3' ? { isEnterprise } : {})
                 }
             };
 
@@ -57,7 +80,11 @@ const TrialPage = ({ user, onUserUpdate }) => {
                 });
 
                 if (resultData.status === 'ready') {
-                    setResult(resultData.solution.gRecaptchaResponse);
+                    const token = captchaType === 'turnstile'
+                        ? resultData.solution.token
+                        : resultData.solution.gRecaptchaResponse;
+                    setResult(token || '');
+                    setSolveTime(((Date.now() - startTimeRef.current) / 1000).toFixed(1));
                     solved = true;
                     // Trigger refresh of user data to show updated trial_balance
                     if (onUserUpdate) onUserUpdate();
@@ -75,6 +102,8 @@ const TrialPage = ({ user, onUserUpdate }) => {
         } catch (err) {
             setError(err.response?.data?.errorDescription || err.message || 'An error occurred');
         } finally {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
             setLoading(false);
         }
     };
@@ -99,7 +128,7 @@ const TrialPage = ({ user, onUserUpdate }) => {
                             <Sparkles size={28} />
                         </div>
                         <div>
-                            <h2 className="text-3xl font-extrabold text-white tracking-tight">{t('trial')}</h2>
+                            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">{t('trial')}</h2>
                             <p className="text-slate-500">{t('trialDesc')}</p>
                         </div>
                     </div>
@@ -123,6 +152,52 @@ const TrialPage = ({ user, onUserUpdate }) => {
                 <div className="lg:col-span-3 space-y-6">
                     <div className={`p-8 rounded-[32px] border ${isDark ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200 shadow-xl shadow-slate-200/50'}`}>
                         <form onSubmit={handleSolve} className="space-y-6">
+                            {/* Captcha Type Selector */}
+                            <div className="space-y-2">
+                                <label className={`text-sm font-bold flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                                    <Shield size={16} /> Captcha Type
+                                </label>
+                                <div className={`p-1.5 rounded-2xl flex gap-1.5 ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'}`}>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setCaptchaType('recaptcha'); setResult(''); setError(''); }}
+                                        className={`flex-1 py-2.5 px-2 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1 whitespace-nowrap ${
+                                            captchaType === 'recaptcha'
+                                                ? 'bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow-lg shadow-sky-500/25'
+                                                : isDark ? 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
+                                        }`}
+                                    >
+                                        <img src="https://www.gstatic.com/recaptcha/api2/logo_48.png" alt="" className="w-4 h-4 shrink-0" />
+                                        ReCaptcha V2
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setCaptchaType('recaptchav3'); setResult(''); setError(''); }}
+                                        className={`flex-1 py-2.5 px-2 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1 whitespace-nowrap ${
+                                            captchaType === 'recaptchav3'
+                                                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/25'
+                                                : isDark ? 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
+                                        }`}
+                                    >
+                                        <img src="https://www.gstatic.com/recaptcha/api2/logo_48.png" alt="" className="w-4 h-4 shrink-0" />
+                                        V3
+                                        <span className="px-1 py-0.5 bg-white/20 text-[8px] font-black uppercase rounded-full leading-none">NEW</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setCaptchaType('turnstile'); setResult(''); setError(''); }}
+                                        className={`flex-1 py-2.5 px-2 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1 whitespace-nowrap ${
+                                            captchaType === 'turnstile'
+                                                ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-lg shadow-orange-500/25'
+                                                : isDark ? 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
+                                        }`}
+                                    >
+                                        <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                                        Turnstile
+                                    </button>
+                                </div>
+                            </div>
+
                             <div className="space-y-2">
                                 <label className={`text-sm font-bold flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                                     <Key size={16} /> {t('siteKey')}
@@ -135,7 +210,7 @@ const TrialPage = ({ user, onUserUpdate }) => {
                                         ? 'bg-slate-950 border-slate-800 focus:border-sky-500 text-white'
                                         : 'bg-slate-50 border-slate-200 focus:border-sky-500 text-slate-900'
                                         } border-2`}
-                                    placeholder="6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI"
+                                    placeholder={captchaType === 'turnstile' ? '0x4AAAAAAA...' : captchaType === 'recaptchav3' ? '6Le9HlYqAAAAA...' : '6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI'}
                                 />
                             </div>
 
@@ -155,6 +230,49 @@ const TrialPage = ({ user, onUserUpdate }) => {
                                 />
                             </div>
 
+                            {/* Page Action - only for ReCaptcha V3 */}
+                            {captchaType === 'recaptchav3' && (
+                                <div className="space-y-2">
+                                    <label className={`text-sm font-bold flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                                        <Zap size={16} /> Page Action
+                                        <span className={`text-xs font-normal ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>(optional)</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={formData.pageAction}
+                                        onChange={(e) => setFormData({ ...formData, pageAction: e.target.value })}
+                                        className={`w-full px-5 py-4 rounded-2xl outline-none transition-all text-sm ${isDark
+                                            ? 'bg-slate-950 border-slate-800 focus:border-emerald-500 text-white'
+                                            : 'bg-slate-50 border-slate-200 focus:border-emerald-500 text-slate-900'
+                                            } border-2`}
+                                        placeholder="login, submit, verify, homepage..."
+                                    />
+                                </div>
+                            )}
+
+                            {/* Enterprise Toggle - only for ReCaptcha V3 */}
+                            {captchaType === 'recaptchav3' && (
+                                <div className={`flex items-center justify-between p-4 rounded-2xl border ${isDark ? 'bg-slate-950/50 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-lg">🏢</span>
+                                        <div>
+                                            <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Enterprise</span>
+                                            <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Bật nếu trang dùng reCAPTCHA Enterprise</p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsEnterprise(!isEnterprise)}
+                                        className={`relative w-12 h-6 rounded-full transition-all duration-300 ${isEnterprise
+                                            ? 'bg-emerald-500 shadow-lg shadow-emerald-500/30'
+                                            : isDark ? 'bg-slate-700' : 'bg-slate-300'
+                                        }`}
+                                    >
+                                        <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all duration-300 ${isEnterprise ? 'left-[26px]' : 'left-0.5'}`} />
+                                    </button>
+                                </div>
+                            )}
+
                             {error && (
                                 <motion.div
                                     initial={{ opacity: 0, x: -10 }}
@@ -173,7 +291,7 @@ const TrialPage = ({ user, onUserUpdate }) => {
                                 {loading ? (
                                     <>
                                         <Loader2 className="animate-spin" size={20} />
-                                        {t('solving')}
+                                        {t('solving')} ({elapsedTime.toFixed(1)}s)
                                     </>
                                 ) : (
                                     <>
@@ -195,6 +313,18 @@ const TrialPage = ({ user, onUserUpdate }) => {
 
                         {result ? (
                             <div className="space-y-4">
+                                {solveTime && (
+                                    <motion.div
+                                        initial={{ opacity: 0, scale: 0.9 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        className={`flex items-center justify-center gap-2 py-3 px-4 rounded-xl border ${isDark ? 'bg-amber-500/5 border-amber-500/20' : 'bg-amber-50 border-amber-200'}`}
+                                    >
+                                        <Clock size={16} className="text-amber-400" />
+                                        <span className={`text-sm font-bold ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+                                            Thời gian xử lý: {solveTime}s
+                                        </span>
+                                    </motion.div>
+                                )}
                                 <div className={`p-5 rounded-2xl font-mono text-xs break-all max-h-[300px] overflow-y-auto leading-relaxed border ${isDark ? 'bg-slate-950 border-slate-800 text-sky-400' : 'bg-slate-50 border-slate-200 text-sky-600'
                                     }`}>
                                     {result}
